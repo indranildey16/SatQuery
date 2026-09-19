@@ -18,7 +18,7 @@ class InferenceOrchestrator:
         elif settings.INFERENCE_MODE.lower() == "colab":
             self._adapter = ColabInferenceAdapter(
                 colab_url=settings.COLAB_INFERENCE_URL,
-                token=settings.COLAB_INFERENCE_TOKEN,
+                token=settings.token,
                 timeout_seconds=settings.TIMEOUT_SECONDS,
             )
         else:

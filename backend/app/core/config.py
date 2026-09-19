@@ -12,10 +12,15 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     INFERENCE_MODE: str = "mock"
     COLAB_INFERENCE_URL: str = ""
-    COLAB_INFERENCE_TOKEN: str = ""
+    COLAB_INFERENCE_TOKEN: str = "SatQuery-colab-2026-nilnavneet123"
+    SATQUERY_TOKEN: str = "SatQuery-colab-2026-nilnavneet123"
     TIMEOUT_SECONDS: int = 120
     MAX_UPLOAD_SIZE_MB: int = 50
     UPLOAD_DIR: str = "./data/uploads"
+
+    @property
+    def token(self) -> str:
+        return self.SATQUERY_TOKEN or self.COLAB_INFERENCE_TOKEN
     
     @property
     def cors_origins_list(self) -> List[str]:

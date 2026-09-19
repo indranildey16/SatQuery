@@ -91,7 +91,7 @@ from PIL import Image
 import io
 import time
 
-COLAB_AUTH_TOKEN = "your-private-secure-token-here"
+COLAB_AUTH_TOKEN = "SatQuery-colab-2026-nilnavneet123"
 
 app = FastAPI(title="SatQuery Colab Inference Worker")
 
@@ -183,7 +183,8 @@ INFERENCE_MODE=colab
 COLAB_INFERENCE_URL=https://your-tunnel-id.ngrok-free.app
 
 # Private token matching COLAB_AUTH_TOKEN in the Colab notebook
-COLAB_INFERENCE_TOKEN=your-private-secure-token-here
+COLAB_INFERENCE_TOKEN=SatQuery-colab-2026-nilnavneet123
+SATQUERY_TOKEN=SatQuery-colab-2026-nilnavneet123
 
 # Maximum seconds to wait for model inference (default: 120s)
 TIMEOUT_SECONDS=120
