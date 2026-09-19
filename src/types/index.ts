@@ -35,6 +35,9 @@ export interface ImageryMetadata {
 export interface AnalysisInput {
   imageId?: string;
   imageUrl: string;
+  beforeImageUrl?: string;
+  afterImageUrl?: string;
+  imageAfterUrl?: string;
   metadata: ImageryMetadata;
 }
 
@@ -55,9 +58,34 @@ export interface Segment {
   visible?: boolean;
 }
 
+export interface ChangedRegion {
+  id: string;
+  pixelArea: number;
+  relativeAreaPercent: number;
+  bbox: [number, number, number, number]; // [ymin, xmin, ymax, xmax]
+  bboxXywh?: [number, number, number, number];
+  centroid: [number, number];
+}
+
+export interface ChangeAnalysisStats {
+  changedPixelCount: number;
+  totalValidPixelCount: number;
+  changePercentage: number;
+  changedRegionCount: number;
+  largestRegionArea: number;
+  largestRegionBbox?: [number, number, number, number] | null;
+  method?: {
+    type: string;
+    threshold?: number;
+    minAreaPixels?: number;
+    metric?: string;
+    [key: string]: any;
+  };
+}
+
 export interface VisualizationLayer {
   id: string;
-  type: 'original' | 'overlay' | 'segmentation' | 'bounding_boxes' | 'heatmap' | 'sar_fusion';
+  type: 'original' | 'overlay' | 'segmentation' | 'bounding_boxes' | 'heatmap' | 'sar_fusion' | 'before' | 'after' | 'change_mask' | 'change_overlay';
   label: string;
   badge?: string;
   visible: boolean;
@@ -118,6 +146,8 @@ export interface AnalysisResultData {
     cloudOcclusionPercent?: number;
     ndwiIndex?: number;
   };
+  changeAnalysis?: ChangeAnalysisStats;
+  changedRegions?: ChangedRegion[];
 }
 
 export interface Analysis {
@@ -142,7 +172,11 @@ export interface Analysis {
 
 export interface CreateAnalysisPayload {
   file?: File | Blob | null;
+  fileAfter?: File | Blob | null;
   imageUrl?: string;
+  imageAfterUrl?: string;
+  beforeImageUrl?: string;
+  afterImageUrl?: string;
   query: {
     text: string;
     task: TaskType;

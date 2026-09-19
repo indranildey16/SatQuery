@@ -26,18 +26,34 @@ const PIPELINE_STEPS = [
   { id: 'RESULT READY', label: 'Result Ready', description: 'Finalizing visualization artifacts' }
 ];
 
+const CHANGE_PIPELINE_STEPS = [
+  { id: 'INPUT RECEIVED', label: 'Input Ingestion', description: 'Validating bi-temporal imagery buffers' },
+  { id: 'IMAGE VALIDATION', label: 'Image Validation', description: 'Checking dimensions, formats, and channels' },
+  { id: 'IMAGE ALIGNMENT', label: 'Image Alignment', description: 'Aligning before and after working resolutions' },
+  { id: 'CHANGE ESTIMATION', label: 'Change Estimation', description: 'Computing Euclidean pixel difference & thresholding' },
+  { id: 'MASK PROCESSING', label: 'Mask Processing', description: 'Morphological opening/closing noise filters' },
+  { id: 'REGION EXTRACTION', label: 'Region Extraction', description: 'Connected-component labeling & spatial bounding boxes' },
+  { id: 'VISUALIZATION GENERATION', label: 'Visualization Generation', description: 'Rendering change mask & overlay layers' },
+  { id: 'RESULT NORMALIZATION', label: 'Result Normalization', description: 'Synthesizing spatial change metrics & summary' },
+  { id: 'RESULT READY', label: 'Result Ready', description: 'Finalizing visualization artifacts' }
+];
+
 export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
+  const isChangeAnalysis = analysis.query.task === 'change_analysis';
+  const steps = isChangeAnalysis ? CHANGE_PIPELINE_STEPS : PIPELINE_STEPS;
   const normalizedCurrentStage = (analysis.currentStage || analysis.stage || '').replace(/_/g, ' ').toUpperCase();
-  const currentStageIndex = PIPELINE_STEPS.findIndex(
+  
+  const currentStageIndex = steps.findIndex(
     (s) => s.id.toUpperCase() === normalizedCurrentStage ||
            (s.id === 'INPUT RECEIVED' && normalizedCurrentStage === 'UPLOAD RECEIVED') ||
            (s.id === 'IMAGE VALIDATED' && normalizedCurrentStage === 'IMAGE VALIDATION') ||
+           (s.id === 'IMAGE VALIDATION' && normalizedCurrentStage === 'IMAGE VALIDATED') ||
            (s.id === 'QUERY ROUTING' && normalizedCurrentStage === 'QUERY INTERPRETATION') ||
            (s.id === 'COLAB INFERENCE' && normalizedCurrentStage === 'MODEL INFERENCE') ||
            (s.id === 'RESULT NORMALIZATION' && normalizedCurrentStage === 'RESULT PROCESSING')
   );
   const activeIndex = currentStageIndex === -1 ? 0 : currentStageIndex;
-  const progressPercent = analysis.progress || Math.round(((activeIndex + 1) / PIPELINE_STEPS.length) * 100);
+  const progressPercent = analysis.progress || Math.round(((activeIndex + 1) / steps.length) * 100);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f8fafc] overflow-y-auto p-6 select-none">

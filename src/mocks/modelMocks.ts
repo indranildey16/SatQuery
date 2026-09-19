@@ -28,10 +28,21 @@ export const MOCK_MODELS: ModelInfo[] = [
     name: 'Sentinel-1 C-Band SAR Feature Extractor',
     version: 'SAR v1.2',
     modality: ['sar'],
-    tasks: ['detection', 'change_analysis'],
-    status: 'loading',
+    tasks: ['detection'],
+    status: 'unavailable',
     environment: 'Cloud Inference Server',
     description: 'Synthetic Aperture Radar amplitude & coherence detector for all-weather monitoring.',
     isDemo: true
+  },
+  {
+    id: 'classical-change-baseline',
+    name: 'Classical Change Detection Baseline',
+    version: 'Baseline v1.0',
+    modality: ['optical', 'auto'],
+    tasks: ['change_analysis'],
+    status: 'available',
+    environment: 'FastAPI Computational Specialist',
+    description: 'Deterministic pixel differencing, morphological filtering, and connected-component spatial change baseline.',
+    isDemo: false
   }
 ];

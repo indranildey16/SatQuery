@@ -22,7 +22,11 @@ export const NewAnalysisPage: React.FC = () => {
   // Form State
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFileAfter, setSelectedFileAfter] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('/samples/guinea-bissau-sample.jpg');
+  const [imageAfterPreview, setImageAfterPreview] = useState<string | null>(null);
+  const fileInputAfterRef = useRef<HTMLInputElement>(null);
+
   const [metadata, setMetadata] = useState<ImageryMetadata>({
     filename: 'Earth_from_Space_Guinea-Bissau.jpg',
     width: 3840,
@@ -74,15 +78,24 @@ export const NewAnalysisPage: React.FC = () => {
   }, []);
 
   // Suggested Technical Queries
-  const sampleQueries = [
+  const defaultQueries = [
     { text: 'What are the main land-cover types visible in this image?', task: 'vqa' as TaskType },
+    { text: 'Describe the scene and major geomorphological features.', task: 'captioning' as TaskType },
     { text: 'Identify all cargo shipping vessels and maritime infrastructure.', task: 'detection' as TaskType },
-    { text: 'Describe the scene and major geomorphological features.', task: 'scene_understanding' as TaskType },
     { text: 'Segment built-up urban structures versus vegetation and water.', task: 'segmentation' as TaskType },
-    { text: 'Detect recent changes or anomalous clearing along the river banks.', task: 'change_analysis' as TaskType }
+    { text: 'What areas have changed between these two images?', task: 'change_analysis' as TaskType }
   ];
 
-  // Handle Drag & Drop and File Selection
+  const changeQueries = [
+    { text: 'What areas have changed between these two images?', task: 'change_analysis' as TaskType },
+    { text: 'Show the major changed regions.', task: 'change_analysis' as TaskType },
+    { text: 'How much of the scene changed?', task: 'change_analysis' as TaskType },
+    { text: 'Where are the largest changes?', task: 'change_analysis' as TaskType }
+  ];
+
+  const currentQueries = taskType === 'change_analysis' ? changeQueries : defaultQueries;
+
+  // Handle Drag & Drop and File Selection (Primary / Before)
   const handleFileProcess = (file: File) => {
     setErrorMessage(null);
     setSelectedFile(file);
@@ -92,11 +105,6 @@ export const NewAnalysisPage: React.FC = () => {
     if (!validFormats.includes(file.type) && !isTiff) {
       setErrorMessage(`Unsupported format (${file.type || 'unknown'}). Please provide PNG, JPEG, or TIFF remote sensing imagery.`);
       return;
-    }
-
-    if (isTiff && file.type === '') {
-      // Browser cannot directly render TIFF without specialized WebGL/Canvas reader, notify user
-      setErrorMessage('Notice: GeoTIFF metadata accepted. Browser preview will display fallback canvas for unrasterized TIFF.');
     }
 
     const objectUrl = URL.createObjectURL(file);
@@ -120,30 +128,54 @@ export const NewAnalysisPage: React.FC = () => {
         coordinates: undefined
       });
     };
-    img.onerror = () => {
-      // For TIFF or binary files
-      setMetadata({
-        filename: file.name,
-        width: 3840,
-        height: 3840,
-        format: 'image/tiff',
-        fileSizeBytes: file.size,
-        modality: modality === 'auto' ? 'optical' : modality,
-        satellite: 'User Uploaded Scene',
-        sensor: 'Optical RGB / Multispectral',
-        acquisitionDate: new Date().toISOString().substring(0, 10),
-        resolutionMeters: undefined,
-        cloudCoveragePercent: undefined,
-        coordinates: undefined
-      });
-    };
   };
 
-  const handleSelectSample = (type: 'guinea-bissau' | 'port') => {
+  // Handle Drag & Drop and File Selection (After Image)
+  const handleFileProcessAfter = (file: File) => {
+    setErrorMessage(null);
+    setSelectedFileAfter(file);
+    const validFormats = ['image/png', 'image/jpeg', 'image/jpg', 'image/tiff'];
+    const isTiff = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
+
+    if (!validFormats.includes(file.type) && !isTiff) {
+      setErrorMessage(`Unsupported format (${file.type || 'unknown'}). Please provide PNG, JPEG, or TIFF remote sensing imagery.`);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setImageAfterPreview(objectUrl);
+  };
+
+  const handleSelectSample = (type: 'guinea-bissau' | 'port' | 'bitemporal') => {
     setErrorMessage(null);
     setSelectedFile(null);
-    if (type === 'guinea-bissau') {
+    setSelectedFileAfter(null);
+    if (type === 'bitemporal') {
+      setImagePreview('/samples/bitemporal_before.jpg');
+      setImageAfterPreview('/samples/bitemporal_after.jpg');
+      setTaskType('change_analysis');
+      setQueryText('What areas have changed between these two images?');
+      setMetadata({
+        filename: 'Maritime_Port_Temporal_Pair.tif',
+        width: 957,
+        height: 769,
+        format: 'image/jpeg',
+        fileSizeBytes: 420000,
+        modality: 'optical',
+        satellite: 'Sentinel-2 Bi-Temporal',
+        sensor: 'MSI Multispectral',
+        acquisitionDate: '2025-09-12 / 2026-09-12',
+        resolutionMeters: 10.0,
+        cloudCoveragePercent: 0.0,
+        coordinates: {
+          lat: 22.3326,
+          lng: 114.1881,
+          crs: 'WGS 84 / UTM 18N'
+        }
+      });
+    } else if (type === 'guinea-bissau') {
       setImagePreview('/samples/guinea-bissau-sample.jpg');
+      setImageAfterPreview(null);
       setMetadata({
         filename: 'Earth_from_Space_Guinea-Bissau.jpg',
         width: 3840,
@@ -163,9 +195,10 @@ export const NewAnalysisPage: React.FC = () => {
         }
       });
       setQueryText('What are the main land-cover types visible in this image?');
-      setTaskType('vqa');
+      setTaskType('auto');
     } else {
       setImagePreview('/samples/port-assessment-reference.jpg');
+      setImageAfterPreview(null);
       setMetadata({
         filename: 'Sentinel2_Maritime_Bay_L2A.tif',
         width: 3840,
@@ -193,7 +226,13 @@ export const NewAnalysisPage: React.FC = () => {
     setErrorMessage(null);
 
     // Validation
-    if (!imagePreview) {
+    if (taskType === 'change_analysis') {
+      if (!imagePreview || !imageAfterPreview) {
+        setErrorMessage('Please provide both a BEFORE image and an AFTER image for bi-temporal change analysis.');
+        setCurrentStep(1);
+        return;
+      }
+    } else if (!imagePreview) {
       setErrorMessage('Please upload a remote-sensing scene or select a sample image.');
       setCurrentStep(1);
       return;
@@ -208,16 +247,23 @@ export const NewAnalysisPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const resolvedModality = modality === 'auto' ? 'optical' : modality;
-      const targetModelId = modelMode === 'manual' ? selectedModelId : (models[0]?.id || MOCK_MODELS[0].id);
+      const isChangeTask = taskType === 'change_analysis' || (queryText.toLowerCase().includes('change') && (Boolean(imageAfterPreview) || Boolean(selectedFileAfter)));
+      const targetModelId = modelMode === 'manual' 
+        ? selectedModelId 
+        : (isChangeTask ? 'classical-change-baseline' : (models[0]?.id || MOCK_MODELS[0].id));
 
       const res = await analysisService.createAnalysis({
         file: selectedFile,
+        fileAfter: selectedFileAfter,
         imageUrl: imagePreview,
+        imageAfterUrl: imageAfterPreview || undefined,
         modality: resolvedModality,
         modelSelectionMode: modelMode,
         modelId: targetModelId,
         input: {
           imageUrl: imagePreview,
+          beforeImageUrl: imagePreview,
+          afterImageUrl: imageAfterPreview || undefined,
           metadata: {
             ...metadata,
             modality: resolvedModality
@@ -320,6 +366,13 @@ export const NewAnalysisPage: React.FC = () => {
                 <span className="text-[11px] text-slate-500">Quick Demo Sample:</span>
                 <button
                   type="button"
+                  onClick={() => handleSelectSample('bitemporal')}
+                  className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-orange-50 hover:bg-orange-100 text-[#c2410c] border border-orange-200 cursor-pointer"
+                >
+                  Port Temporal Pair (Change)
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleSelectSample('guinea-bissau')}
                   className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 cursor-pointer"
                 >
@@ -335,40 +388,128 @@ export const NewAnalysisPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Upload Dropzone */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.dataTransfer.files?.[0]) {
-                  handleFileProcess(e.dataTransfer.files[0]);
-                }
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-300 hover:border-[#c2410c] bg-slate-50/50 hover:bg-orange-50/20 rounded-lg p-6 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-3"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={(e) => {
-                  if (e.target.files?.[0]) handleFileProcess(e.target.files[0]);
+            {/* Upload Dropzones */}
+            {taskType === 'change_analysis' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* BEFORE IMAGE UPLOADER */}
+                <div className="border border-slate-200 rounded-lg p-3.5 bg-slate-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold font-mono text-slate-800">BEFORE IMAGE (T0 Baseline)</span>
+                    {imagePreview ? (
+                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                        Loaded
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                        Required
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files?.[0]) handleFileProcess(e.dataTransfer.files[0]);
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 hover:border-[#c2410c] bg-white rounded-lg p-5 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-2"
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleFileProcess(e.target.files[0]);
+                      }}
+                      accept="image/png,image/jpeg,image/tiff,.tif,.tiff"
+                      className="hidden"
+                    />
+                    <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-[#c2410c]">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-700">
+                      {imagePreview ? 'Click or drop to replace Before image' : 'Upload or drop Before scene'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* AFTER IMAGE UPLOADER */}
+                <div className="border border-slate-200 rounded-lg p-3.5 bg-slate-50/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold font-mono text-slate-800">AFTER IMAGE (T1 Observation)</span>
+                    {imageAfterPreview ? (
+                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                        Loaded
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                        Required
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files?.[0]) handleFileProcessAfter(e.dataTransfer.files[0]);
+                    }}
+                    onClick={() => fileInputAfterRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 hover:border-[#c2410c] bg-white rounded-lg p-5 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-2"
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputAfterRef}
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleFileProcessAfter(e.target.files[0]);
+                      }}
+                      accept="image/png,image/jpeg,image/tiff,.tif,.tiff"
+                      className="hidden"
+                    />
+                    <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-[#c2410c]">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-700">
+                      {imageAfterPreview ? 'Click or drop to replace After image' : 'Upload or drop After scene'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer.files?.[0]) {
+                    handleFileProcess(e.dataTransfer.files[0]);
+                  }
                 }}
-                accept="image/png,image/jpeg,image/tiff,.tif,.tiff"
-                className="hidden"
-              />
-              <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-[#c2410c]">
-                <Upload className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-slate-800">
-                  Drop GeoTIFF, PNG, or JPEG satellite scenes here
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-300 hover:border-[#c2410c] bg-slate-50/50 hover:bg-orange-50/20 rounded-lg p-6 text-center cursor-pointer transition flex flex-col items-center justify-center space-y-3"
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFileProcess(e.target.files[0]);
+                  }}
+                  accept="image/png,image/jpeg,image/tiff,.tif,.tiff"
+                  className="hidden"
+                />
+                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-[#c2410c]">
+                  <Upload className="w-5 h-5" />
                 </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  Supports optical multispectral and SAR C-band products up to 50MB
+                <div>
+                  <div className="text-xs font-semibold text-slate-800">
+                    Drop GeoTIFF, PNG, or JPEG satellite scenes here
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Supports optical multispectral and SAR C-band products up to 50MB
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* STEP 2: MODALITY SELECTION */}
@@ -447,7 +588,7 @@ export const NewAnalysisPage: React.FC = () => {
                 Suggested Technical Inquiries:
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {sampleQueries.map((q, idx) => (
+                {currentQueries.map((q, idx) => (
                   <button
                     key={idx}
                     type="button"
@@ -471,9 +612,9 @@ export const NewAnalysisPage: React.FC = () => {
                   { id: 'auto', label: 'Auto (Query Router)', badge: 'SMART ROUTER' },
                   { id: 'vqa', label: 'Single-image VQA', badge: 'WORKING POC' },
                   { id: 'captioning', label: 'Scene Captioning', badge: 'DEMONSTRATED' },
+                  { id: 'change_analysis', label: 'Change Analysis', badge: 'WORKING BASELINE' },
                   { id: 'detection', label: 'Object Detection', badge: 'DEMO' },
-                  { id: 'segmentation', label: 'Land-Cover Segmentation', badge: 'DEMO' },
-                  { id: 'change_analysis', label: 'Change Analysis', badge: 'PLANNED' }
+                  { id: 'segmentation', label: 'Land-Cover Segmentation', badge: 'DEMO' }
                 ].map((t) => (
                   <button
                     key={t.id}
@@ -535,17 +676,31 @@ export const NewAnalysisPage: React.FC = () => {
             </div>
 
             {modelMode === 'auto' ? (
-              <div className="p-3.5 rounded-lg border border-emerald-200 bg-emerald-50/50 flex items-start space-x-3">
-                <Sparkles className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
-                <div>
-                  <div className="text-xs font-bold text-emerald-900">
-                    Automatic Dispatch: Qwen2.5-VL-3B-Instruct
-                  </div>
-                  <div className="text-[11px] text-emerald-800 mt-0.5">
-                    SatQuery routes single-image VQA & scene understanding queries to the Colab Tesla T4 inference worker adapter.
+              taskType === 'change_analysis' ? (
+                <div className="p-3.5 rounded-lg border border-orange-200 bg-orange-50/50 flex items-start space-x-3">
+                  <Sparkles className="w-4 h-4 text-[#c2410c] mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold text-orange-950">
+                      Automatic Dispatch: Classical Change Detection Baseline
+                    </div>
+                    <div className="text-[11px] text-orange-900 mt-0.5">
+                      SatQuery executes deterministic pixel differencing, morphological noise filtering, and connected-component spatial change extraction.
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-3.5 rounded-lg border border-emerald-200 bg-emerald-50/50 flex items-start space-x-3">
+                  <Sparkles className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold text-emerald-900">
+                      Automatic Dispatch: Qwen2.5-VL-3B-Instruct
+                    </div>
+                    <div className="text-[11px] text-emerald-800 mt-0.5">
+                      SatQuery routes single-image VQA & scene understanding queries to the Colab Tesla T4 inference worker adapter.
+                    </div>
+                  </div>
+                </div>
+              )
             ) : (
               <div className="space-y-2">
                 {models.map((m) => (
@@ -594,20 +749,45 @@ export const NewAnalysisPage: React.FC = () => {
               </span>
             </div>
 
-            <div className="w-full aspect-video bg-slate-900 rounded-md overflow-hidden relative border border-slate-200 flex items-center justify-center">
-              {imagePreview ? (
-                <img
-                  src={imagePreview}
-                  alt="Satellite Preview"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="text-xs font-mono text-slate-500">No Image Loaded</div>
-              )}
-              <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/80 text-white font-mono text-[10px] backdrop-blur-xs border border-white/20">
-                {metadata.filename}
+            {taskType === 'change_analysis' ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="aspect-video bg-slate-900 rounded-md overflow-hidden relative border border-slate-200 flex items-center justify-center">
+                  {imagePreview ? (
+                    <img src={imagePreview} alt="Before" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-[10px] font-mono text-slate-500">No Before Image</div>
+                  )}
+                  <div className="absolute top-1.5 left-1.5 px-1.5 py-0.2 rounded bg-slate-900/80 text-white font-mono text-[9px] border border-white/20">
+                    BEFORE (T0)
+                  </div>
+                </div>
+                <div className="aspect-video bg-slate-900 rounded-md overflow-hidden relative border border-slate-200 flex items-center justify-center">
+                  {imageAfterPreview ? (
+                    <img src={imageAfterPreview} alt="After" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-[10px] font-mono text-slate-500">No After Image</div>
+                  )}
+                  <div className="absolute top-1.5 left-1.5 px-1.5 py-0.2 rounded bg-slate-900/80 text-white font-mono text-[9px] border border-white/20">
+                    AFTER (T1)
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="w-full aspect-video bg-slate-900 rounded-md overflow-hidden relative border border-slate-200 flex items-center justify-center">
+                {imagePreview ? (
+                  <img
+                    src={imagePreview}
+                    alt="Satellite Preview"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="text-xs font-mono text-slate-500">No Image Loaded</div>
+                )}
+                <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/80 text-white font-mono text-[10px] backdrop-blur-xs border border-white/20">
+                  {metadata.filename}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Technical Metadata Panel */}

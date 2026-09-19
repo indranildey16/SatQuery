@@ -13,10 +13,12 @@ router = APIRouter(prefix="/analyses", tags=["Analyses"])
 
 @router.post("", response_model=AnalysisCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_analysis(
-    image: UploadFile = File(..., description="Satellite imagery file (JPEG, PNG, GeoTIFF)"),
+    image: Optional[UploadFile] = File(None, description="Satellite imagery file (JPEG, PNG, GeoTIFF)"),
+    image_before: Optional[UploadFile] = File(None, description="Before imagery file for bi-temporal change analysis"),
+    image_after: Optional[UploadFile] = File(None, description="After imagery file for bi-temporal change analysis"),
     query: str = Form("", description="Natural language remote sensing question"),
     modality: str = Form("auto", description="Sensor modality (optical, sar, auto)"),
-    task: str = Form("auto", description="Target task type (auto, vqa, caption, detection, segmentation)"),
+    task: str = Form("auto", description="Target task type (auto, vqa, caption, change_analysis)"),
     model_selection_mode: str = Form("auto", description="Routing mode: auto or manual"),
     model_id: Optional[str] = Form(None, description="Optional target model identifier"),
     project_id: Optional[str] = Form(None, description="Optional associate project ID")
@@ -24,10 +26,13 @@ async def create_analysis(
     """
     Submit a satellite scene and analytical query for multimodal remote-sensing analysis.
     Initiates asynchronous processing and returns a queued analysis ID.
+    Supports single-image VQA/captioning as well as bi-temporal change analysis.
     """
     try:
+        primary_file = image_before if (image_before is not None and image is None) else image
         return await analysis_service.create_analysis(
-            file=image,
+            file=primary_file,
+            file_after=image_after,
             query=query,
             modality=modality,
             task=task,

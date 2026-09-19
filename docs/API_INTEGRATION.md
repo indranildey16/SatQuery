@@ -81,11 +81,22 @@ Returns registered machine learning vision-language models and analytical pipeli
     "name": "Sentinel-1 C-Band SAR Feature Extractor",
     "version": "SAR v1.2",
     "modality": ["sar"],
-    "tasks": ["detection", "change_analysis"],
+    "tasks": ["detection"],
     "status": "unavailable",
     "environment": "Cloud Inference Server",
     "description": "Synthetic Aperture Radar amplitude & coherence detector for all-weather monitoring.",
     "isDemo": true
+  },
+  {
+    "id": "classical-change-baseline",
+    "name": "Classical Change Detection Baseline",
+    "version": "Baseline v1.0",
+    "modality": ["optical", "auto"],
+    "tasks": ["change_analysis"],
+    "status": "available",
+    "environment": "FastAPI Computational Specialist",
+    "description": "Deterministic pixel differencing, morphological filtering, and connected-component spatial change baseline.",
+    "isDemo": false
   }
 ]
 ```
@@ -121,12 +132,14 @@ Submits an imagery scene and analytical prompt. Accepts `multipart/form-data`.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `image` | Binary File | **Yes** | — | Supported: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.geotiff` (Max 25MB) |
-| `query` | String | **Yes** (for VQA/captioning) | `""` | Natural-language analytical question (min 3 chars) |
+| `image` | Binary File | Conditionally | — | Primary scene file (or before scene) (Max 25MB) |
+| `image_before` | Binary File | No | `null` | Before scene file for bi-temporal change analysis |
+| `image_after` | Binary File | No | `null` | After scene file for bi-temporal change analysis |
+| `query` | String | **Yes** | `""` | Natural-language analytical question (min 3 chars) |
 | `modality` | String | No | `"auto"` | `optical`, `sar`, or `auto` |
-| `task` | String | No | `"auto"` | `auto` (routes via Rule-Based Query Router), `vqa`, `caption` / `captioning` |
+| `task` | String | No | `"auto"` | `auto` (Query Router), `vqa`, `caption`, `change_analysis` |
 | `model_selection_mode` | String | No | `"auto"` | `auto` or `manual` |
-| `model_id` | String | No | `null` | Target model ID (e.g. `qwen2.5-vl-3b`) |
+| `model_id` | String | No | `null` | Target model ID (e.g. `qwen2.5-vl-3b` or `classical-change-baseline`) |
 | `project_id` | String | No | `null` | Associated project workspace ID |
 
 **Response (`201 Created`)**:
@@ -264,18 +277,32 @@ Retrieves the current state. When `status` is `queued` or `processing`, returns 
 
 ## 3. Structural Pipeline Stages
 
-The backend progresses deterministically through 8 stages:
+### 3.1 Single-Image VQA & Captioning Stages (8 Stages)
 
 | Stage Name | Progress % | Simulated Latency | Description |
 |---|---|---|---|
-| `UPLOAD_RECEIVED` | 12% | ~150ms | Ingesting and verifying image format |
+| `INPUT_RECEIVED` | 12% | ~150ms | Ingesting and verifying image format |
 | `IMAGE_VALIDATION` | 24% | ~200ms | Checking spatial bounds & resolution |
 | `MODALITY_RESOLUTION` | 36% | ~200ms | Spectral band identification & coordinate system |
-| `QUERY_INTERPRETATION` | 48% | ~200ms | NLP tokenization of inquiry |
+| `QUERY_ROUTING` | 48% | ~200ms | NLP classification into VQA vs Captioning |
 | `MODEL_SELECTION` | 60% | ~200ms | Routing to target model adapter |
-| `MODEL_INFERENCE` | 78% | ~400ms | Vision-language attention inference |
-| `RESULT_PROCESSING` | 90% | ~250ms | Formatting observations & confidence notes |
+| `COLAB_INFERENCE` | 78% | ~400ms | Multimodal attention inference (Colab / Mock) |
+| `RESULT_NORMALIZATION` | 90% | ~250ms | Formatting observations & telemetry |
 | `RESULT_READY` | 100% | ~100ms | Ready for visualization in viewer |
+
+### 3.2 Bi-temporal Change Detection Baseline Stages (9 Stages)
+
+| Stage Name | Progress % | Typical Latency | Description |
+|---|---|---|---|
+| `INPUT_RECEIVED` | 12% | ~100ms | Validating bi-temporal imagery payloads |
+| `IMAGE_VALIDATION` | 24% | ~100ms | Checking dimensional resolutions & color spaces |
+| `IMAGE_ALIGNMENT` | 36% | ~150ms | Normalizing working resolutions & CRS references |
+| `CHANGE_ESTIMATION` | 50% | ~150ms | Euclidean RGB pixel difference intensity thresholding |
+| `MASK_PROCESSING` | 65% | ~150ms | Morphological opening & closing spatial filters |
+| `REGION_EXTRACTION` | 78% | ~150ms | Connected-component labeling & bounding boxes |
+| `VISUALIZATION_GENERATION` | 88% | ~150ms | Generating mask & change overlay data URLs |
+| `RESULT_NORMALIZATION` | 95% | ~100ms | Synthesizing spatial change metrics & summary |
+| `RESULT_READY` | 100% | ~50ms | Finalizing analysis artifact package |
 
 ---
 

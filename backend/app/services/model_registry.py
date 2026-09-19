@@ -31,11 +31,22 @@ REGISTERED_MODELS: List[ModelInfoSchema] = [
         name="Sentinel-1 C-Band SAR Feature Extractor",
         version="SAR v1.2",
         modality=[ModalityEnum.SAR],
-        tasks=[TaskTypeEnum.DETECTION, TaskTypeEnum.CHANGE_ANALYSIS],
+        tasks=[TaskTypeEnum.DETECTION],
         status="unavailable",
         environment="Cloud Inference Server",
         description="Synthetic Aperture Radar amplitude & coherence detector for all-weather monitoring.",
         isDemo=True
+    ),
+    ModelInfoSchema(
+        id="classical-change-baseline",
+        name="Classical Change Detection Baseline",
+        version="Baseline v1.0",
+        modality=[ModalityEnum.OPTICAL, ModalityEnum.AUTO],
+        tasks=[TaskTypeEnum.CHANGE_ANALYSIS],
+        status="available",
+        environment="FastAPI Computational Specialist",
+        description="Deterministic pixel differencing, morphological filtering, and connected-component spatial change baseline.",
+        isDemo=False
     )
 ]
 
@@ -51,7 +62,9 @@ class ModelRegistryService:
         return None
 
     def get_default_model(self, task: TaskTypeEnum) -> ModelInfoSchema:
-        if task in [TaskTypeEnum.VQA, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING]:
+        if task == TaskTypeEnum.CHANGE_ANALYSIS:
+            return REGISTERED_MODELS[3]
+        elif task in [TaskTypeEnum.VQA, TaskTypeEnum.CAPTION, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING]:
             return REGISTERED_MODELS[0]
         elif task in [TaskTypeEnum.DETECTION, TaskTypeEnum.SEGMENTATION]:
             return REGISTERED_MODELS[1]

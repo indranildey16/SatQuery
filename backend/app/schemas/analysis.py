@@ -33,6 +33,8 @@ class ImageryMetadataSchema(BaseModel):
 class AnalysisInputSchema(BaseModel):
     imageId: Optional[str] = None
     imageUrl: str
+    beforeImageUrl: Optional[str] = None
+    afterImageUrl: Optional[str] = None
     metadata: ImageryMetadataSchema
 
 
@@ -102,6 +104,25 @@ class AnalysisMetricsSchema(BaseModel):
     ndwiIndex: Optional[float] = None
 
 
+class ChangedRegionSchema(BaseModel):
+    id: str
+    pixelArea: int
+    relativeAreaPercent: float
+    bbox: List[int]
+    bboxXywh: Optional[List[int]] = None
+    centroid: List[float]
+
+
+class ChangeAnalysisStatsSchema(BaseModel):
+    changedPixelCount: int
+    totalValidPixelCount: int
+    changePercentage: float
+    changedRegionCount: int
+    largestRegionArea: int
+    largestRegionBbox: Optional[List[int]] = None
+    method: Optional[Dict[str, Any]] = None
+
+
 class AnalysisResultDataSchema(BaseModel):
     summary: str
     rawAnswer: Optional[str] = None
@@ -111,6 +132,8 @@ class AnalysisResultDataSchema(BaseModel):
     visualizations: List[VisualizationLayerSchema] = []
     geojson: Optional[Any] = None
     metrics: Optional[AnalysisMetricsSchema] = None
+    changeAnalysis: Optional[ChangeAnalysisStatsSchema] = None
+    changedRegions: Optional[List[ChangedRegionSchema]] = None
 
 
 class AnalysisDetailResponse(BaseModel):

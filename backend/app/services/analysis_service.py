@@ -27,12 +27,15 @@ from ..schemas.analysis import (
     VisualizationLayerSchema,
     DetectionSchema,
     SegmentSchema,
-    AnalysisMetricsSchema
+    AnalysisMetricsSchema,
+    ChangedRegionSchema,
+    ChangeAnalysisStatsSchema
 )
 from ..storage.in_memory import analysis_store, save_uploaded_file
 from .model_registry import model_registry
 from .inference_service import inference_orchestrator
 from .query_router import route_query, RouteResult, UnsupportedTaskError
+from .change_detection_service import change_detection_service, ChangeAnalysisError
 from ..adapters.exceptions import InferenceAdapterError
 from ..core.config import settings
 from ..core.logging import logger
@@ -66,17 +69,40 @@ class AnalysisService:
         query: str,
         task: str,
         modality: str,
-        model_selection_mode: str
+        model_selection_mode: str,
+        file_after: Optional[UploadFile] = None
     ) -> None:
-        if not file or not file.filename:
-            raise AnalysisValidationError("MISSING_IMAGE", "Satellite image file is required.")
+        is_change_task = (task or "").strip().lower() in ["change_analysis", "change_detection", "bitemporal_change"] or file_after is not None
 
-        ext = Path(file.filename).suffix.lower()
-        if ext not in SUPPORTED_EXTENSIONS:
-            raise AnalysisValidationError(
-                "INVALID_IMAGE",
-                f"Unsupported image format '{ext}'. Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-            )
+        if is_change_task:
+            if not file or not file.filename:
+                raise AnalysisValidationError("MISSING_BEFORE_IMAGE", "Before satellite image file is required for change analysis.")
+            if not file_after or not file_after.filename:
+                raise AnalysisValidationError("MISSING_AFTER_IMAGE", "After satellite image file is required for change analysis.")
+
+            ext_b = Path(file.filename).suffix.lower()
+            if ext_b not in SUPPORTED_EXTENSIONS:
+                raise AnalysisValidationError(
+                    "INVALID_IMAGE",
+                    f"Unsupported before image format '{ext_b}'. Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+                )
+
+            ext_a = Path(file_after.filename).suffix.lower()
+            if ext_a not in SUPPORTED_EXTENSIONS:
+                raise AnalysisValidationError(
+                    "INVALID_IMAGE",
+                    f"Unsupported after image format '{ext_a}'. Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+                )
+        else:
+            if not file or not file.filename:
+                raise AnalysisValidationError("MISSING_IMAGE", "Satellite image file is required.")
+
+            ext = Path(file.filename).suffix.lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                raise AnalysisValidationError(
+                    "INVALID_IMAGE",
+                    f"Unsupported image format '{ext}'. Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+                )
 
         # Modality check
         try:
@@ -89,7 +115,7 @@ class AnalysisService:
 
         # Task check via query router validation
         try:
-            route_query(query=query or "", modality=modality, requested_task=task)
+            route_query(query=query or "", modality=modality, requested_task=task, has_bitemporal_inputs=is_change_task)
         except UnsupportedTaskError as e:
             raise AnalysisValidationError("UNSUPPORTED_TASK", str(e))
 
@@ -97,7 +123,7 @@ class AnalysisService:
         if not query or len(query.strip()) < 3:
             raise AnalysisValidationError(
                 "MISSING_QUERY",
-                "Query text (at least 3 characters) is required for VQA, captioning, or scene understanding tasks."
+                "Query text (at least 3 characters) is required for remote sensing analysis."
             )
 
         if model_selection_mode.lower() not in ["auto", "manual"]:
@@ -108,22 +134,29 @@ class AnalysisService:
 
     async def create_analysis(
         self,
-        file: UploadFile,
+        file: Optional[UploadFile],
         query: str,
         modality: str = "auto",
         task: str = "auto",
         model_selection_mode: str = "auto",
         model_id: Optional[str] = None,
-        project_id: Optional[str] = None
+        project_id: Optional[str] = None,
+        file_after: Optional[UploadFile] = None
     ) -> AnalysisCreateResponse:
-        self.validate_submission(file, query, task, modality, model_selection_mode)
+        self.validate_submission(
+            file=file,
+            query=query,
+            task=task,
+            modality=modality,
+            model_selection_mode=model_selection_mode,
+            file_after=file_after
+        )
 
-        # Save uploaded file
+        # Save uploaded primary file (before image)
         saved_file_path = await save_uploaded_file(file)
         file_size = os.path.getsize(saved_file_path)
 
         if file_size > settings.max_upload_size_bytes:
-            # Clean up oversized file
             if os.path.exists(saved_file_path):
                 os.remove(saved_file_path)
             raise AnalysisValidationError(
@@ -131,10 +164,34 @@ class AnalysisService:
                 f"File size exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
             )
 
+        saved_after_path = None
+        if file_after:
+            saved_after_path = await save_uploaded_file(file_after)
+            after_size = os.path.getsize(saved_after_path)
+            if after_size > settings.max_upload_size_bytes:
+                if os.path.exists(saved_after_path):
+                    os.remove(saved_after_path)
+                raise AnalysisValidationError(
+                    "FILE_TOO_LARGE",
+                    f"After image file size exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
+                )
+
         # Evaluate query routing
-        route_result = route_query(query=query, modality=modality, requested_task=task)
+        has_bitemporal = (file_after is not None) or (task.lower() in ["change_analysis", "change_detection"])
+        route_result = route_query(
+            query=query,
+            modality=modality,
+            requested_task=task,
+            has_bitemporal_inputs=has_bitemporal
+        )
         modality_enum = ModalityEnum(modality.lower())
-        task_enum = TaskTypeEnum.CAPTIONING if route_result.task == "caption" else TaskTypeEnum.VQA
+
+        if route_result.task == "change_analysis":
+            task_enum = TaskTypeEnum.CHANGE_ANALYSIS
+        elif route_result.task == "caption":
+            task_enum = TaskTypeEnum.CAPTIONING
+        else:
+            task_enum = TaskTypeEnum.VQA
 
         selected_model = None
         if model_id:
@@ -163,6 +220,21 @@ class AnalysisService:
 
         title = query.strip() if query and len(query.strip()) <= 45 else (query[:42] + "..." if query else "Remote-Sensing Scene Inspection")
 
+        if route_result.task == "change_analysis":
+            analysis_input = AnalysisInputSchema(
+                imageId=f"img-{analysis_id.lower()}",
+                imageUrl="/samples/bitemporal_before.jpg",
+                beforeImageUrl="/samples/bitemporal_before.jpg",
+                afterImageUrl="/samples/bitemporal_after.jpg",
+                metadata=input_metadata
+            )
+        else:
+            analysis_input = AnalysisInputSchema(
+                imageId=f"img-{analysis_id.lower()}",
+                imageUrl="/samples/guinea-bissau-sample.jpg",
+                metadata=input_metadata
+            )
+
         initial_record = AnalysisDetailResponse(
             id=analysis_id,
             analysis_id=analysis_id,
@@ -173,11 +245,7 @@ class AnalysisService:
             currentStage=PipelineStageEnum.INPUT_RECEIVED.value,
             enclaveCrs="EPSG:4326 (WGS 84)",
             query=QuerySchema(text=query, task=task_enum),
-            input=AnalysisInputSchema(
-                imageId=f"img-{analysis_id.lower()}",
-                imageUrl=f"/samples/guinea-bissau-sample.jpg", # Local preview asset reference
-                metadata=input_metadata
-            ),
+            input=analysis_input,
             model=selected_model,
             results=None,
             trace=None,
@@ -188,15 +256,27 @@ class AnalysisService:
         await analysis_store.save(initial_record)
 
         # Launch asynchronous progression in background
-        asyncio.create_task(
-            self._execute_pipeline(
-                analysis_id=analysis_id,
-                file_path=saved_file_path,
-                query=query,
-                route_result=route_result,
-                model_info=selected_model
+        if route_result.task == "change_analysis":
+            asyncio.create_task(
+                self._execute_change_pipeline(
+                    analysis_id=analysis_id,
+                    before_path=saved_file_path,
+                    after_path=saved_after_path or saved_file_path,
+                    query=query,
+                    route_result=route_result,
+                    model_info=selected_model
+                )
             )
-        )
+        else:
+            asyncio.create_task(
+                self._execute_pipeline(
+                    analysis_id=analysis_id,
+                    file_path=saved_file_path,
+                    query=query,
+                    route_result=route_result,
+                    model_info=selected_model
+                )
+            )
 
         return AnalysisCreateResponse(
             analysis_id=analysis_id,
@@ -358,6 +438,213 @@ class AnalysisService:
             )
         except Exception as e:
             logger.exception("Failed processing analysis %s: %s", analysis_id, e)
+            await analysis_store.update_status(
+                analysis_id=analysis_id,
+                status=AnalysisStatusEnum.FAILED.value,
+                progress=0,
+                stage="FAILED",
+                error=str(e),
+                error_code="INTERNAL_SERVER_ERROR",
+                updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+
+    async def _execute_change_pipeline(
+        self,
+        analysis_id: str,
+        before_path: str,
+        after_path: str,
+        query: str,
+        route_result: RouteResult,
+        model_info: Any
+    ):
+        start_time = time.time()
+        accumulated_stages: List[ExecutionTraceItemSchema] = []
+        task_label = "Bi-temporal Change Analysis"
+
+        stages = [
+            (PipelineStageEnum.INPUT_RECEIVED, 12, 100, "Validating bi-temporal imagery input payloads"),
+            (PipelineStageEnum.IMAGE_VALIDATION, 24, 100, "Checking dimensional resolutions, readable headers, and color spaces"),
+            (PipelineStageEnum.IMAGE_ALIGNMENT, 36, 150, "Aligning before and after image working resolutions"),
+            (PipelineStageEnum.CHANGE_ESTIMATION, 50, 150, "Computing Euclidean RGB pixel differences and intensity thresholding"),
+            (PipelineStageEnum.MASK_PROCESSING, 65, 150, "Applying morphological opening/closing noise filters"),
+            (PipelineStageEnum.REGION_EXTRACTION, 78, 150, "Connected-component labeling and contour bounding box extraction"),
+            (PipelineStageEnum.VISUALIZATION_GENERATION, 88, 150, "Rendering high-contrast change mask and overlay visualization layers"),
+            (PipelineStageEnum.RESULT_NORMALIZATION, 95, 100, "Synthesizing spatial change metrics and deterministic summary"),
+            (PipelineStageEnum.RESULT_READY, 100, 50, "Finalizing analysis artifact package")
+        ]
+
+        try:
+            res = None
+            for stage_enum, progress_pct, delay_ms, desc in stages:
+                stage_start = time.time()
+                await analysis_store.update_status(
+                    analysis_id=analysis_id,
+                    status=AnalysisStatusEnum.PROCESSING.value,
+                    progress=progress_pct,
+                    stage=stage_enum.value,
+                    updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+
+                detail_text = desc
+                if stage_enum == PipelineStageEnum.CHANGE_ESTIMATION:
+                    # Run real change detection calculation
+                    res = change_detection_service.run_change_detection(before_path, after_path)
+                    align_method = res["alignment"]["method"]
+                    w, h = res["alignment"]["workingDimensions"]
+                    detail_text = f"Computed pixel differences ({align_method}, working resolution: {w}x{h})"
+                elif stage_enum == PipelineStageEnum.REGION_EXTRACTION and res:
+                    reg_count = res["statistics"]["changedRegionCount"]
+                    detail_text = f"Extracted {reg_count} distinct connected changed regions"
+                elif stage_enum == PipelineStageEnum.RESULT_NORMALIZATION and res:
+                    pct = res["statistics"]["changePercentage"]
+                    detail_text = f"Normalized change coverage: {pct}% of surface footprint"
+                else:
+                    await asyncio.sleep(delay_ms / 1000.0)
+
+                stage_duration = int((time.time() - stage_start) * 1000)
+                accumulated_stages.append(
+                    ExecutionTraceItemSchema(
+                        stage=stage_enum.value,
+                        timestamp=datetime.now().strftime("%H:%M:%S"),
+                        durationMs=stage_duration,
+                        status="completed",
+                        details=detail_text
+                    )
+                )
+
+            if res is None:
+                raise ChangeAnalysisError("CHANGE_ANALYSIS_FAILED", "Change analysis pipeline produced no result.")
+
+            total_runtime = round(time.time() - start_time, 2)
+            stats = res["statistics"]
+            runtime_ms = int(total_runtime * 1000)
+
+            # Build visualization layers
+            vis_layers = [
+                VisualizationLayerSchema(
+                    id="layer-before",
+                    type="before",
+                    label="Base Before (Scene)",
+                    badge="BEFORE",
+                    visible=True,
+                    opacity=100,
+                    imageUrl="/samples/bitemporal_before.jpg"
+                ),
+                VisualizationLayerSchema(
+                    id="layer-after",
+                    type="after",
+                    label="Base After (Scene)",
+                    badge="AFTER",
+                    visible=True,
+                    opacity=100,
+                    imageUrl="/samples/bitemporal_after.jpg"
+                ),
+                VisualizationLayerSchema(
+                    id="layer-mask",
+                    type="change_mask",
+                    label="Binary Change Mask",
+                    badge="MASK",
+                    visible=True,
+                    opacity=85,
+                    imageUrl=res["visualizations"]["maskDataUrl"]
+                ),
+                VisualizationLayerSchema(
+                    id="layer-overlay",
+                    type="change_overlay",
+                    label="Change Detection Baseline",
+                    badge="OVERLAY",
+                    visible=True,
+                    opacity=85,
+                    imageUrl=res["visualizations"]["overlayDataUrl"]
+                )
+            ]
+
+            results = AnalysisResultDataSchema(
+                summary=res["summary"],
+                rawAnswer=(
+                    f"{res['summary']}\n\n"
+                    "Note: The baseline detects image-level spatial differences. It does not establish the semantic "
+                    "cause of change (such as construction, flooding, or deforestation), which requires domain-specific "
+                    "remote-sensing models or multi-temporal calibration."
+                ),
+                findings=res["findings"],
+                detections=[],
+                segments=[],
+                visualizations=vis_layers,
+                geojson=None,
+                metrics=AnalysisMetricsSchema(
+                    runtimeMs=runtime_ms,
+                    confidenceScore=None,
+                    confidenceLabel="Deterministic Baseline",
+                    detectedVessels=0,
+                    cloudOcclusionPercent=0.0
+                ),
+                changeAnalysis=ChangeAnalysisStatsSchema(**stats),
+                changedRegions=[ChangedRegionSchema(**r) for r in res["regions"]]
+            )
+
+            trace = ExecutionTraceSchema(
+                inputCount=2,
+                task=task_label,
+                router="Rule-Based Query Router",
+                routerReason=route_result.reason,
+                model="Classical Change Detection Baseline",
+                inference="FastAPI Computational Specialist",
+                status=AnalysisStatusEnum.COMPLETED,
+                runtimeSeconds=total_runtime,
+                confidenceNote="Spatial change computed algorithmically. Uncalibrated for semantic causation.",
+                evidenceNote="Observations derived via pixel-difference baseline and morphological connected components.",
+                stages=accumulated_stages
+            )
+
+            await analysis_store.update_status(
+                analysis_id=analysis_id,
+                status=AnalysisStatusEnum.COMPLETED.value,
+                progress=100,
+                stage=PipelineStageEnum.RESULT_READY.value,
+                results=results,
+                trace=trace,
+                updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+            logger.info("Completed change analysis %s in %.2fs", analysis_id, total_runtime)
+
+        except ChangeAnalysisError as e:
+            logger.warning("Change analysis error for %s: [%s] %s", analysis_id, e.code, e.message)
+            total_runtime = round(time.time() - start_time, 2)
+            accumulated_stages.append(
+                ExecutionTraceItemSchema(
+                    stage="CHANGE_ANALYSIS_FAILED",
+                    timestamp=datetime.now().strftime("%H:%M:%S"),
+                    durationMs=int(total_runtime * 1000),
+                    status="failed",
+                    details=f"[{e.code}] {e.message}"
+                )
+            )
+            failed_trace = ExecutionTraceSchema(
+                inputCount=2,
+                task=task_label,
+                router="Rule-Based Query Router",
+                routerReason=route_result.reason,
+                model="Classical Change Detection Baseline",
+                inference="FastAPI Computational Specialist",
+                status=AnalysisStatusEnum.FAILED,
+                runtimeSeconds=total_runtime,
+                confidenceNote="Change analysis pipeline aborted.",
+                evidenceNote=f"Failure code: {e.code}",
+                stages=accumulated_stages
+            )
+            await analysis_store.update_status(
+                analysis_id=analysis_id,
+                status=AnalysisStatusEnum.FAILED.value,
+                progress=0,
+                stage="FAILED",
+                trace=failed_trace,
+                error=e.message,
+                error_code=e.code,
+                updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        except Exception as e:
+            logger.exception("Failed processing change analysis %s: %s", analysis_id, e)
             await analysis_store.update_status(
                 analysis_id=analysis_id,
                 status=AnalysisStatusEnum.FAILED.value,

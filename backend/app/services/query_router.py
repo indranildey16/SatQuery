@@ -17,7 +17,7 @@ class RouteResult(BaseModel):
 class UnsupportedTaskError(Exception):
     def __init__(self, task: str):
         self.task = task
-        super().__init__(f"Unsupported task '{task}'. Supported tasks: 'vqa', 'caption' (or 'auto').")
+        super().__init__(f"Unsupported task '{task}'. Supported tasks: 'vqa', 'caption', 'change_analysis' (or 'auto').")
 
 
 CAPTION_PHRASES = [
@@ -52,10 +52,31 @@ VQA_PHRASES = [
 ]
 
 
+CHANGE_PHRASES = [
+    "change between",
+    "changed between",
+    "changes between",
+    "what has changed",
+    "what changed",
+    "areas have changed",
+    "areas changed",
+    "regions changed",
+    "difference between",
+    "scene changed",
+    "how much of the scene changed",
+    "how much changed",
+    "where are the largest changes",
+    "show the major changed regions",
+    "major changed regions",
+    "change analysis"
+]
+
+
 def route_query(
     query: str,
     modality: str = "auto",
-    requested_task: Optional[str] = None
+    requested_task: Optional[str] = None,
+    has_bitemporal_inputs: bool = False
 ) -> RouteResult:
     """
     Route an incoming remote-sensing query to the appropriate specialist capability.
@@ -80,13 +101,36 @@ def route_query(
                 reason="Explicit captioning task selected",
                 model="qwen2.5-vl-3b"
             )
+        elif cleaned_task in ["change_analysis", "change_detection", "bitemporal_change"]:
+            return RouteResult(
+                task="change_analysis",
+                reason="Explicit change analysis task selected",
+                model="classical-change-baseline"
+            )
         else:
             raise UnsupportedTaskError(requested_task)
+
+    # If bi-temporal inputs provided or change task signaled
+    if has_bitemporal_inputs:
+        return RouteResult(
+            task="change_analysis",
+            reason="Bi-temporal image pair provided",
+            model="classical-change-baseline"
+        )
 
     # Automatic deterministic routing based on query
     q_norm = " " + (query or "").lower().strip() + " "
 
-    # Check for captioning markers first
+    # Check for change phrases first
+    for phrase in CHANGE_PHRASES:
+        if phrase in q_norm:
+            return RouteResult(
+                task="change_analysis",
+                reason="Bi-temporal change inquiry detected in query",
+                model="classical-change-baseline"
+            )
+
+    # Check for captioning markers
     for phrase in CAPTION_PHRASES:
         if phrase in q_norm:
             return RouteResult(
