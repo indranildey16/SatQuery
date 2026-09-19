@@ -141,13 +141,17 @@ export const AnalysisResultPage: React.FC = () => {
             <span className="truncate">"{analysis.query.text}"</span>
           </div>
           <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center gap-x-2">
-            <span>Model: <strong className="font-semibold text-slate-700">{analysis.model.name}</strong> ({analysis.model.version})</span>
+            <span>Task: <strong className="font-semibold text-slate-700">{analysis.trace?.task || (analysis.query.task === 'captioning' ? 'Scene Captioning' : 'Single-image VQA')}</strong></span>
+            <span>•</span>
+            <span>Router: <strong className="font-semibold text-slate-700">{analysis.trace?.router || 'Rule-Based Query Router'}</strong></span>
+            <span>•</span>
+            <span>Model: <strong className="font-semibold text-slate-700">{analysis.model.name}</strong></span>
             <span>•</span>
             <span>Latency: <strong className="font-semibold text-emerald-700">{runtimeDisplay}</strong></span>
             <span>•</span>
             <span>Engine: <span className="text-slate-600">{analysis.model.environment}</span></span>
             <span>•</span>
-            <span>GSD: <span className="text-slate-600">{analysis.input.metadata.resolutionMeters ? `${analysis.input.metadata.resolutionMeters}m` : '0.8m Super-Resolved'}</span></span>
+            <span>GSD: <span className="text-slate-600">{analysis.input.metadata.resolutionMeters ? `${analysis.input.metadata.resolutionMeters}m` : '10m'}</span></span>
           </div>
         </div>
       </div>

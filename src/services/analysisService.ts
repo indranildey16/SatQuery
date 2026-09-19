@@ -326,7 +326,7 @@ The exact boundaries and specific types of these land-cover types vary depending
     formData.append('modality', modality);
 
     // 4. Task
-    const task = payload.query.task || 'vqa';
+    const task = payload.query.task || 'auto';
     formData.append('task', task);
 
     // 5. Model Selection Mode & Model ID

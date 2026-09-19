@@ -124,7 +124,7 @@ Submits an imagery scene and analytical prompt. Accepts `multipart/form-data`.
 | `image` | Binary File | **Yes** | — | Supported: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.geotiff` (Max 25MB) |
 | `query` | String | **Yes** (for VQA/captioning) | `""` | Natural-language analytical question (min 3 chars) |
 | `modality` | String | No | `"auto"` | `optical`, `sar`, or `auto` |
-| `task` | String | No | `"vqa"` | `vqa`, `captioning`, `detection`, `segmentation`, `scene_understanding`, `change_analysis` |
+| `task` | String | No | `"auto"` | `auto` (routes via Rule-Based Query Router), `vqa`, `caption` / `captioning` |
 | `model_selection_mode` | String | No | `"auto"` | `auto` or `manual` |
 | `model_id` | String | No | `null` | Target model ID (e.g. `qwen2.5-vl-3b`) |
 | `project_id` | String | No | `null` | Associated project workspace ID |
@@ -236,20 +236,23 @@ Retrieves the current state. When `status` is `queued` or `processing`, returns 
   "trace": {
     "inputCount": 1,
     "task": "vqa",
+    "router": "Rule-Based Query Router",
+    "routerReason": "Detected interrogative structure: query begins with 'what are'",
     "model": "Qwen2.5-VL-3B-Instruct",
+    "inference": "Colab",
     "status": "completed",
-    "runtimeSeconds": 2.2,
+    "runtimeSeconds": 4.48,
     "confidenceNote": "Confidence is uncalibrated for demo VQA outputs.",
     "evidenceNote": "Observations derived via vision-language spatial tokens.",
     "stages": [
-      { "stage": "UPLOAD_RECEIVED", "timestamp": "16:05:18", "durationMs": 150, "status": "completed", "details": "Validating image payload and MIME format" },
-      { "stage": "IMAGE_VALIDATION", "timestamp": "16:05:18", "durationMs": 200, "status": "completed", "details": "Checking dimensional resolution and spectral profile" },
-      { "stage": "MODALITY_RESOLUTION", "timestamp": "16:05:18", "durationMs": 200, "status": "completed", "details": "Resolving sensor band alignment and CRS reference" },
-      { "stage": "QUERY_INTERPRETATION", "timestamp": "16:05:19", "durationMs": 200, "status": "completed", "details": "Parsing natural-language query and task constraints" },
+      { "stage": "INPUT_RECEIVED", "timestamp": "16:05:18", "durationMs": 150, "status": "completed", "details": "Validated image payload and MIME format" },
+      { "stage": "IMAGE_VALIDATED", "timestamp": "16:05:18", "durationMs": 200, "status": "completed", "details": "Resolution: 3840x3840, format: image/jpeg" },
+      { "stage": "MODALITY_RESOLUTION", "timestamp": "16:05:18", "durationMs": 200, "status": "completed", "details": "Modality resolved to optical" },
+      { "stage": "QUERY_ROUTING", "timestamp": "16:05:19", "durationMs": 200, "status": "completed", "details": "Rule-Based Query Router routed to single_image_vqa" },
       { "stage": "MODEL_SELECTION", "timestamp": "16:05:19", "durationMs": 200, "status": "completed", "details": "Selected target model: Qwen2.5-VL-3B-Instruct" },
-      { "stage": "MODEL_INFERENCE", "timestamp": "16:05:19", "durationMs": 400, "status": "completed", "details": "Inference executed using Qwen2.5-VL-3B-Instruct for vqa" },
-      { "stage": "RESULT_PROCESSING", "timestamp": "16:05:20", "durationMs": 250, "status": "completed", "details": "Synthesizing findings and geospatial telemetry" },
-      { "stage": "RESULT_READY", "timestamp": "16:05:20", "durationMs": 100, "status": "completed", "details": "Finalizing visualization layers" }
+      { "stage": "COLAB_INFERENCE", "timestamp": "16:05:19", "durationMs": 4480, "status": "completed", "details": "Colab GPU inference executed successfully" },
+      { "stage": "RESULT_NORMALIZATION", "timestamp": "16:05:23", "durationMs": 250, "status": "completed", "details": "Normalized raw model response" },
+      { "stage": "RESULT_READY", "timestamp": "16:05:23", "durationMs": 100, "status": "completed", "details": "Analysis artifact package assembled" }
     ]
   },
   "createdAt": "2026-09-18 16:05:18",

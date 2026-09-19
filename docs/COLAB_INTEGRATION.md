@@ -52,18 +52,19 @@ The Google Colab worker must expose the following HTTP endpoints:
 - **Headers**: `X-SatQuery-Token: <token>`
 - **Form Fields**:
   - `image`: Binary image file (JPEG, PNG, or TIFF)
-  - `question`: Natural language inquiry string
-  - `task`: Target task type (`vqa` or `captioning`)
+  - `question`: Natural language inquiry string (for VQA: query; for captioning: `"Describe this remote-sensing image in 3-5 sentences..."` or user prompt)
+  - `task`: Target task type (`vqa` or `caption`)
 
 #### Expected Response (`200 OK`):
 ```json
 {
   "answer": "The main land-cover types visible in this image include:\n1. Forested Areas: Dense mangrove and tidal canopy.\n2. Water Bodies: Estuarine channels.\n3. Dense Vegetation: Agricultural clearings.",
   "model": "Qwen2.5-VL-3B-Instruct",
-  "task": "single_image_vqa",
+  "task": "vqa",
   "runtime_ms": 1450
 }
 ```
+*Note: For captioning requests (`task: "caption"`), `task` is returned as `"caption"` or `"scene_captioning"` and normalized by `ColabInferenceAdapter`.*
 
 #### Error Response:
 ```json

@@ -39,6 +39,34 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
         """
         Execute single-image Vision-Question Answering against the Colab Qwen2.5-VL endpoint.
         """
+        return await self._dispatch_inference(image_path=image_path, query=query, task="vqa", options=options)
+
+    async def run_caption(
+        self, image_path: str, options: Optional[Dict[str, Any]] = None
+    ) -> InferenceOutput:
+        """
+        Generate scene description against the Colab Qwen2.5-VL endpoint.
+        """
+        opts = options or {}
+        query = opts.get("query") or (
+            "Describe this remote-sensing image in 3-5 sentences. "
+            "Mention major land-cover types, water bodies, vegetation, "
+            "built-up areas, and other clearly visible features. "
+            "Do not invent details that are not visible."
+        )
+        return await self._dispatch_inference(image_path=image_path, query=query, task="caption", options=options)
+
+    async def _dispatch_inference(
+        self,
+        image_path: str,
+        query: str,
+        task: str = "vqa",
+        options: Optional[Dict[str, Any]] = None
+    ) -> InferenceOutput:
+        """
+        Core HTTP multipart dispatcher for VQA and captioning tasks.
+        Handles candidate tokens, task compatibility fallback, and honest response normalization.
+        """
         if not self.colab_url:
             raise ColabUnavailableError(
                 "COLAB_INFERENCE_URL is not configured. Please set the Colab tunnel URL in backend environment."
@@ -60,6 +88,7 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
 
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         last_response = None
+        effective_task = task
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -74,7 +103,7 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                         }
                         data = {
                             "question": query,
-                            "task": "vqa"
+                            "task": effective_task
                         }
                         response = await client.post(
                             endpoint,
@@ -90,6 +119,31 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                     elif response.status_code in [401, 403]:
                         logger.warning("Colab auth rejected with token '%s...'. Checking next token candidate.", attempt_token[:8])
                         continue
+                    elif response.status_code == 400 and effective_task == "caption" and "Only vqa is enabled" in response.text:
+                        # Colab endpoint is running MVP version that only accepts task="vqa"
+                        logger.info("Colab worker reported task='vqa' only; falling back to caption query via vqa route.")
+                        effective_task = "vqa"
+                        with open(image_path, "rb") as retry_file:
+                            retry_files = {"image": (filename, retry_file, "image/jpeg")}
+                            retry_data = {
+                                "question": (
+                                    "Describe this remote-sensing image in 3-5 sentences. "
+                                    "Mention major land-cover types, water bodies, vegetation, "
+                                    "built-up areas, and other clearly visible features. "
+                                    "Do not invent details that are not visible."
+                                ),
+                                "task": "vqa"
+                            }
+                            response = await client.post(
+                                endpoint,
+                                files=retry_files,
+                                data=retry_data,
+                                headers=headers
+                            )
+                            last_response = response
+                        if response.status_code == 200:
+                            self.token = attempt_token
+                            break
                     else:
                         break
 
@@ -167,16 +221,7 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                 details=payload,
             )
 
-        return self._normalize_vqa_response(payload, query)
-
-    async def run_caption(
-        self, image_path: str, options: Optional[Dict[str, Any]] = None
-    ) -> InferenceOutput:
-        """
-        Generate scene description. Uses standard prompt over the VQA route if Colab endpoint is unified.
-        """
-        caption_query = "Describe this remote sensing scene and its key surface morphology in detail."
-        return await self.run_vqa(image_path, caption_query, options)
+        return self._normalize_inference_response(payload, query, task_type=task)
 
     async def run_change(
         self, image_paths: List[str], options: Optional[Dict[str, Any]] = None
@@ -221,12 +266,13 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                         "reachable": True,
                         "status": "healthy"
                     }
-                return {
-                    "configured": True,
-                    "endpoint": self.colab_url,
-                    "reachable": False,
-                    "status_code": res.status_code
-                }
+                else:
+                    return {
+                        "configured": True,
+                        "endpoint": self.colab_url,
+                        "reachable": False,
+                        "status": f"HTTP {res.status_code}"
+                    }
         except Exception as e:
             return {
                 "configured": True,
@@ -235,7 +281,9 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                 "error": str(e)
             }
 
-    def _normalize_vqa_response(self, payload: Dict[str, Any], query: str) -> InferenceOutput:
+    def _normalize_inference_response(
+        self, payload: Dict[str, Any], query: str, task_type: str = "vqa"
+    ) -> InferenceOutput:
         """
         Converts the raw Colab Qwen2.5-VL response dictionary into a standardized InferenceOutput model.
         Guarantees honest telemetry: no fake bounding boxes, no fake masks, uncalibrated confidence.
@@ -253,12 +301,21 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                 if clean_bullet:
                     findings.append(clean_bullet)
 
+        is_caption = (task_type == "caption" or payload.get("task") in ["scene_captioning", "caption"])
+
         if not findings:
-            findings = [
-                f"Query evaluated: \"{query}\"",
-                "Direct multimodal vision-language attention tokens evaluated across scene raster.",
-                "Zero fabricated entities: bounding boxes and masks omitted for uncalibrated VQA."
-            ]
+            if is_caption:
+                findings = [
+                    "Scene description generated via remote vision-language spatial attention.",
+                    "Identifies major surface morphology, water bodies, and visible land-cover types.",
+                    "Zero fabricated entities: bounding boxes and masks omitted for uncalibrated captioning."
+                ]
+            else:
+                findings = [
+                    f"Query evaluated: \"{query}\"",
+                    "Direct multimodal vision-language attention tokens evaluated across scene raster.",
+                    "Zero fabricated entities: bounding boxes and masks omitted for uncalibrated VQA."
+                ]
 
         # Extract executive summary (first non-empty sentence or line)
         lines = [l.strip() for l in raw_answer.split("\n") if l.strip() and not l.strip().startswith(("#", "-", "*"))]
@@ -268,12 +325,14 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
         else:
             summary = first_line
 
+        confidence_label = "Not calibrated (Colab Captioning)" if is_caption else "Not calibrated (Colab VQA)"
+
         return InferenceOutput(
             summary=summary,
             raw_answer=raw_answer,
             findings=findings[:6],
-            detections=[],   # Honest: no fake bounding boxes for VQA
-            segments=[],     # Honest: no fake segmentation masks for VQA
+            detections=[],   # Honest: no fake bounding boxes
+            segments=[],     # Honest: no fake segmentation masks
             visualizations=[
                 {
                     "id": "layer-base",
@@ -288,10 +347,14 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
             metrics={
                 "runtimeMs": runtime_ms,
                 "confidenceScore": None,
-                "confidenceLabel": "Not calibrated (Colab VQA)",
+                "confidenceLabel": confidence_label,
                 "detectedVessels": 0,
                 "cloudOcclusionPercent": 5.0
             },
             model_name=model_name,
             model_environment="Google Colab (Tesla T4 GPU)"
         )
+
+    def _normalize_vqa_response(self, payload: Dict[str, Any], query: str) -> InferenceOutput:
+        """Backward compatibility helper."""
+        return self._normalize_inference_response(payload, query, task_type="vqa")

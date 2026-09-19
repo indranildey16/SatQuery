@@ -1,7 +1,9 @@
 export type Modality = 'optical' | 'sar' | 'auto';
 
 export type TaskType = 
+  | 'auto'
   | 'vqa' 
+  | 'caption'
   | 'captioning' 
   | 'detection' 
   | 'segmentation' 
@@ -75,7 +77,10 @@ export interface ExecutionTraceItem {
 export interface ExecutionTrace {
   inputCount: number;
   task: string;
+  router?: string;
+  routerReason?: string;
   model: string;
+  inference?: string;
   status: AnalysisStatus;
   runtimeSeconds: number;
   confidenceNote: string;
@@ -120,6 +125,7 @@ export interface Analysis {
   title: string;
   status: AnalysisStatus;
   progress?: number;
+  stage?: string;
   currentStage?: string;
   enclaveCrs?: string;
   query: {

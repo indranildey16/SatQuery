@@ -80,11 +80,14 @@ class ExecutionTraceItemSchema(BaseModel):
 class ExecutionTraceSchema(BaseModel):
     inputCount: int = 1
     task: str
+    router: str = "Rule-Based Query Router"
+    routerReason: Optional[str] = None
     model: str
+    inference: str = "Colab"
     status: AnalysisStatusEnum = AnalysisStatusEnum.COMPLETED
     runtimeSeconds: float
-    confidenceNote: str = "Confidence is indicative and uncalibrated for demo VQA outputs."
-    evidenceNote: str = "Observations derived through multimodal attention token alignment."
+    confidenceNote: str = "Confidence is uncalibrated for demo VQA and captioning outputs."
+    evidenceNote: str = "Observations derived through multimodal attention token alignment on Tesla T4 GPU."
     stages: List[ExecutionTraceItemSchema] = []
 
 

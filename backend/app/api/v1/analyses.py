@@ -16,7 +16,7 @@ async def create_analysis(
     image: UploadFile = File(..., description="Satellite imagery file (JPEG, PNG, GeoTIFF)"),
     query: str = Form("", description="Natural language remote sensing question"),
     modality: str = Form("auto", description="Sensor modality (optical, sar, auto)"),
-    task: str = Form("vqa", description="Target task type (vqa, captioning, detection, segmentation)"),
+    task: str = Form("auto", description="Target task type (auto, vqa, caption, detection, segmentation)"),
     model_selection_mode: str = Form("auto", description="Routing mode: auto or manual"),
     model_id: Optional[str] = Form(None, description="Optional target model identifier"),
     project_id: Optional[str] = Form(None, description="Optional associate project ID")

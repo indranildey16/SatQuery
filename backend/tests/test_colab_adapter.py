@@ -17,17 +17,6 @@ from app.services.inference_service import InferenceOrchestrator
 from app.core.config import settings
 
 
-@pytest.fixture
-def temp_image():
-    """Create a temporary test image file."""
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 200)
-        temp_path = f.name
-    yield temp_path
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
-
-
 def test_adapter_selection_mock(monkeypatch):
     monkeypatch.setattr(settings, "INFERENCE_MODE", "mock")
     orchestrator = InferenceOrchestrator()

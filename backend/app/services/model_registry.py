@@ -9,10 +9,10 @@ REGISTERED_MODELS: List[ModelInfoSchema] = [
         name="Qwen2.5-VL-3B-Instruct",
         version="2.5",
         modality=[ModalityEnum.OPTICAL, ModalityEnum.AUTO],
-        tasks=[TaskTypeEnum.VQA, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING],
+        tasks=[TaskTypeEnum.VQA, TaskTypeEnum.CAPTION, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING],
         status="available",
-        environment="google-colab",
-        description="Demonstrated Vision-Language model running single-image VQA & scene understanding.",
+        environment="Colab",
+        description="Vision-Language model running single-image VQA & scene captioning on Google Colab GPU.",
         isDemo=True
     ),
     ModelInfoSchema(

@@ -16,20 +16,25 @@ interface ProcessingViewProps {
 }
 
 const PIPELINE_STEPS = [
-  { id: 'UPLOAD RECEIVED', label: 'Upload Ingestion', description: 'Validating image buffer' },
-  { id: 'IMAGE VALIDATION', label: 'Image Validation', description: 'Checking dimensions & format' },
+  { id: 'INPUT RECEIVED', label: 'Input Ingestion', description: 'Validating image buffer' },
+  { id: 'IMAGE VALIDATED', label: 'Image Validation', description: 'Checking dimensions & format' },
   { id: 'MODALITY RESOLUTION', label: 'Modality Resolution', description: 'Resolving optical vs SAR spectral bands' },
-  { id: 'QUERY INTERPRETATION', label: 'Query Interpretation', description: 'Tokenizing natural-language prompt' },
+  { id: 'QUERY ROUTING', label: 'Query Routing', description: 'Rule-Based Query Router (VQA vs Caption)' },
   { id: 'MODEL SELECTION', label: 'Model Selection', description: 'Routing to Qwen2.5-VL inference adapter' },
-  { id: 'MODEL INFERENCE', label: 'Model Inference', description: 'Executing vision-language attention' },
-  { id: 'RESULT PROCESSING', label: 'Result Processing', description: 'Formatting findings & telemetry' },
+  { id: 'COLAB INFERENCE', label: 'Model Inference', description: 'Executing vision-language attention' },
+  { id: 'RESULT NORMALIZATION', label: 'Result Normalization', description: 'Formatting findings & telemetry' },
   { id: 'RESULT READY', label: 'Result Ready', description: 'Finalizing visualization artifacts' }
 ];
 
 export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
-  const normalizedCurrentStage = (analysis.currentStage || '').replace(/_/g, ' ').toUpperCase();
+  const normalizedCurrentStage = (analysis.currentStage || analysis.stage || '').replace(/_/g, ' ').toUpperCase();
   const currentStageIndex = PIPELINE_STEPS.findIndex(
-    (s) => s.id.toUpperCase() === normalizedCurrentStage
+    (s) => s.id.toUpperCase() === normalizedCurrentStage ||
+           (s.id === 'INPUT RECEIVED' && normalizedCurrentStage === 'UPLOAD RECEIVED') ||
+           (s.id === 'IMAGE VALIDATED' && normalizedCurrentStage === 'IMAGE VALIDATION') ||
+           (s.id === 'QUERY ROUTING' && normalizedCurrentStage === 'QUERY INTERPRETATION') ||
+           (s.id === 'COLAB INFERENCE' && normalizedCurrentStage === 'MODEL INFERENCE') ||
+           (s.id === 'RESULT NORMALIZATION' && normalizedCurrentStage === 'RESULT PROCESSING')
   );
   const activeIndex = currentStageIndex === -1 ? 0 : currentStageIndex;
   const progressPercent = analysis.progress || Math.round(((activeIndex + 1) / PIPELINE_STEPS.length) * 100);

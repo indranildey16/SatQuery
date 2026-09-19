@@ -46,7 +46,7 @@ export const NewAnalysisPage: React.FC = () => {
   const [queryText, setQueryText] = useState<string>(
     'What are the main land-cover types visible in this image?'
   );
-  const [taskType, setTaskType] = useState<TaskType>('vqa');
+  const [taskType, setTaskType] = useState<TaskType>('auto');
   const [modelMode, setModelMode] = useState<'auto' | 'manual'>('auto');
   const [models, setModels] = useState<ModelInfo[]>(MOCK_MODELS);
   const [selectedModelId, setSelectedModelId] = useState<string>(MOCK_MODELS[0].id);
@@ -468,8 +468,9 @@ export const NewAnalysisPage: React.FC = () => {
               <div className="text-[11px] font-semibold text-slate-600 mb-2">Target Task Type:</div>
               <div className="flex flex-wrap gap-2">
                 {[
+                  { id: 'auto', label: 'Auto (Query Router)', badge: 'SMART ROUTER' },
                   { id: 'vqa', label: 'Single-image VQA', badge: 'WORKING POC' },
-                  { id: 'scene_understanding', label: 'Scene Captioning', badge: 'DEMONSTRATED' },
+                  { id: 'captioning', label: 'Scene Captioning', badge: 'DEMONSTRATED' },
                   { id: 'detection', label: 'Object Detection', badge: 'DEMO' },
                   { id: 'segmentation', label: 'Land-Cover Segmentation', badge: 'DEMO' },
                   { id: 'change_analysis', label: 'Change Analysis', badge: 'PLANNED' }

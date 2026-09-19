@@ -32,20 +32,21 @@ from ..schemas.analysis import (
 from ..storage.in_memory import analysis_store, save_uploaded_file
 from .model_registry import model_registry
 from .inference_service import inference_orchestrator
+from .query_router import route_query, RouteResult, UnsupportedTaskError
 from ..adapters.exceptions import InferenceAdapterError
 from ..core.config import settings
 from ..core.logging import logger
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".geotiff"}
 
-PIPELINE_STAGES = [
-    (PipelineStageEnum.UPLOAD_RECEIVED, 12, 150, "Validating image payload and MIME format"),
-    (PipelineStageEnum.IMAGE_VALIDATION, 24, 200, "Checking dimensional resolution and spectral profile"),
+DEFAULT_PIPELINE_STAGES = [
+    (PipelineStageEnum.INPUT_RECEIVED, 12, 150, "Validating image payload and MIME format"),
+    (PipelineStageEnum.IMAGE_VALIDATED, 24, 200, "Checking dimensional resolution and spectral profile"),
     (PipelineStageEnum.MODALITY_RESOLUTION, 36, 200, "Resolving sensor band alignment and CRS reference"),
-    (PipelineStageEnum.QUERY_INTERPRETATION, 48, 200, "Parsing natural-language query and task constraints"),
+    (PipelineStageEnum.QUERY_ROUTING, 48, 200, "Evaluating query with Rule-Based Query Router"),
     (PipelineStageEnum.MODEL_SELECTION, 60, 200, "Selecting target inference adapter"),
-    (PipelineStageEnum.MODEL_INFERENCE, 78, 400, "Executing multimodal inference"),
-    (PipelineStageEnum.RESULT_PROCESSING, 90, 250, "Synthesizing findings and geospatial telemetry"),
+    (PipelineStageEnum.COLAB_INFERENCE, 78, 400, "Executing multimodal inference"),
+    (PipelineStageEnum.RESULT_NORMALIZATION, 90, 250, "Synthesizing findings and geospatial telemetry"),
     (PipelineStageEnum.RESULT_READY, 100, 100, "Finalizing visualization layers")
 ]
 
@@ -86,22 +87,18 @@ class AnalysisService:
                 f"Unsupported modality '{modality}'. Must be one of: {[m.value for m in ModalityEnum]}"
             )
 
-        # Task check
+        # Task check via query router validation
         try:
-            task_enum = TaskTypeEnum(task.lower())
-        except ValueError:
-            raise AnalysisValidationError(
-                "UNSUPPORTED_TASK",
-                f"Unsupported task '{task}'. Must be one of: {[t.value for t in TaskTypeEnum]}"
-            )
+            route_query(query=query or "", modality=modality, requested_task=task)
+        except UnsupportedTaskError as e:
+            raise AnalysisValidationError("UNSUPPORTED_TASK", str(e))
 
-        # VQA query validation
-        if task_enum in [TaskTypeEnum.VQA, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING]:
-            if not query or len(query.strip()) < 3:
-                raise AnalysisValidationError(
-                    "MISSING_QUERY",
-                    "Query text (at least 3 characters) is required for VQA, captioning, or scene understanding tasks."
-                )
+        # Query presence validation
+        if not query or len(query.strip()) < 3:
+            raise AnalysisValidationError(
+                "MISSING_QUERY",
+                "Query text (at least 3 characters) is required for VQA, captioning, or scene understanding tasks."
+            )
 
         if model_selection_mode.lower() not in ["auto", "manual"]:
             raise AnalysisValidationError(
@@ -114,7 +111,7 @@ class AnalysisService:
         file: UploadFile,
         query: str,
         modality: str = "auto",
-        task: str = "vqa",
+        task: str = "auto",
         model_selection_mode: str = "auto",
         model_id: Optional[str] = None,
         project_id: Optional[str] = None
@@ -134,8 +131,11 @@ class AnalysisService:
                 f"File size exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
             )
 
-        task_enum = TaskTypeEnum(task.lower())
+        # Evaluate query routing
+        route_result = route_query(query=query, modality=modality, requested_task=task)
         modality_enum = ModalityEnum(modality.lower())
+        task_enum = TaskTypeEnum.CAPTIONING if route_result.task == "caption" else TaskTypeEnum.VQA
+
         selected_model = None
         if model_id:
             selected_model = model_registry.get_model_by_id(model_id)
@@ -169,8 +169,8 @@ class AnalysisService:
             title=title,
             status=AnalysisStatusEnum.QUEUED,
             progress=0,
-            stage=PipelineStageEnum.UPLOAD_RECEIVED.value,
-            currentStage=PipelineStageEnum.UPLOAD_RECEIVED.value,
+            stage=PipelineStageEnum.INPUT_RECEIVED.value,
+            currentStage=PipelineStageEnum.INPUT_RECEIVED.value,
             enclaveCrs="EPSG:4326 (WGS 84)",
             query=QuerySchema(text=query, task=task_enum),
             input=AnalysisInputSchema(
@@ -193,7 +193,7 @@ class AnalysisService:
                 analysis_id=analysis_id,
                 file_path=saved_file_path,
                 query=query,
-                task_enum=task_enum,
+                route_result=route_result,
                 model_info=selected_model
             )
         )
@@ -208,15 +208,27 @@ class AnalysisService:
         analysis_id: str,
         file_path: str,
         query: str,
-        task_enum: TaskTypeEnum,
+        route_result: RouteResult,
         model_info: Any
     ):
         start_time = time.time()
         accumulated_stages: List[ExecutionTraceItemSchema] = []
+        task_label = "Scene Captioning" if route_result.task == "caption" else "Single-image VQA"
+
+        stages = [
+            (PipelineStageEnum.INPUT_RECEIVED, 12, 150, "Validating image payload and MIME format"),
+            (PipelineStageEnum.IMAGE_VALIDATED, 24, 200, "Checking dimensional resolution and spectral profile"),
+            (PipelineStageEnum.MODALITY_RESOLUTION, 36, 200, "Resolving sensor band alignment and CRS reference"),
+            (PipelineStageEnum.QUERY_ROUTING, 48, 200, f"Evaluating query with Rule-Based Query Router -> {route_result.task} ({route_result.reason})"),
+            (PipelineStageEnum.MODEL_SELECTION, 60, 200, f"Selected target model: {model_info.name}"),
+            (PipelineStageEnum.COLAB_INFERENCE, 78, 400, f"Executing multimodal inference using {model_info.name} for {route_result.task}"),
+            (PipelineStageEnum.RESULT_NORMALIZATION, 90, 250, "Synthesizing findings and geospatial telemetry"),
+            (PipelineStageEnum.RESULT_READY, 100, 100, "Finalizing visualization layers")
+        ]
 
         try:
             inference_res = None
-            for stage_enum, progress_pct, delay_ms, desc in PIPELINE_STAGES:
+            for stage_enum, progress_pct, delay_ms, desc in stages:
                 stage_start = time.time()
                 await analysis_store.update_status(
                     analysis_id=analysis_id,
@@ -230,14 +242,10 @@ class AnalysisService:
                 if stage_enum == PipelineStageEnum.MODEL_SELECTION:
                     detail_text = f"Selected target model: {model_info.name}"
                     await asyncio.sleep(delay_ms / 1000.0)
-                elif stage_enum == PipelineStageEnum.MODEL_INFERENCE:
-                    detail_text = f"Inference executed using {model_info.name} for {task_enum.value}"
-                    if task_enum in [TaskTypeEnum.VQA, TaskTypeEnum.SCENE_UNDERSTANDING]:
-                        inference_res = await inference_orchestrator.execute_vqa(file_path, query)
-                    elif task_enum == TaskTypeEnum.CAPTIONING:
-                        inference_res = await inference_orchestrator.execute_caption(file_path)
-                    elif task_enum == TaskTypeEnum.CHANGE_ANALYSIS:
-                        inference_res = await inference_orchestrator.execute_change([file_path])
+                elif stage_enum == PipelineStageEnum.COLAB_INFERENCE:
+                    detail_text = f"Inference executed using {model_info.name} for {task_label}"
+                    if route_result.task == "caption":
+                        inference_res = await inference_orchestrator.execute_caption(file_path, options={"query": query})
                     else:
                         inference_res = await inference_orchestrator.execute_vqa(file_path, query)
                 else:
@@ -293,8 +301,11 @@ class AnalysisService:
 
             trace = ExecutionTraceSchema(
                 inputCount=1,
-                task=task_enum.value,
+                task=task_label,
+                router="Rule-Based Query Router",
+                routerReason=route_result.reason,
                 model=inference_res.model_name or model_info.name,
+                inference="Colab" if is_colab else "Mock",
                 status=AnalysisStatusEnum.COMPLETED,
                 runtimeSeconds=total_runtime,
                 confidenceNote=confidence_note,
