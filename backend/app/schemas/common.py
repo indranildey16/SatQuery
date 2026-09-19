@@ -18,6 +18,8 @@ class TaskTypeEnum(str, Enum):
     SEGMENTATION = "segmentation"
     SCENE_UNDERSTANDING = "scene_understanding"
     CHANGE_ANALYSIS = "change_analysis"
+    OPTICAL_LANDCOVER = "optical_landcover"
+    OPTICAL_SAR_LANDCOVER = "optical_sar_landcover"
     CUSTOM = "custom"
 
 

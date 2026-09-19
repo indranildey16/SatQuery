@@ -36,4 +36,6 @@ backend/data/uploads/*
 !backend/data/uploads/.gitkeep
 backend/.env
 data/
+*.pt
+backend/models/weights/*.pt
 

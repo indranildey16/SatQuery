@@ -47,6 +47,28 @@ REGISTERED_MODELS: List[ModelInfoSchema] = [
         environment="FastAPI Computational Specialist",
         description="Deterministic pixel differencing, morphological filtering, and connected-component spatial change baseline.",
         isDemo=False
+    ),
+    ModelInfoSchema(
+        id="satquery-ben14k-optical",
+        name="SatQuery-BEN14K-Multispectral-ResNet18",
+        version="1.0-ResNet18",
+        modality=[ModalityEnum.OPTICAL, ModalityEnum.AUTO],
+        tasks=[TaskTypeEnum.OPTICAL_LANDCOVER],
+        status="available",
+        environment="Local PyTorch (CPU/MPS)",
+        description="10-band Sentinel-2 multispectral ResNet18 multi-label land-cover classifier (16 BigEarthNet classes).",
+        isDemo=False
+    ),
+    ModelInfoSchema(
+        id="satquery-sar-optical-fusion",
+        name="SatQuery-BEN14K-SAR-Optical-Fusion",
+        version="1.0-DualResNet18",
+        modality=[ModalityEnum.OPTICAL, ModalityEnum.SAR, ModalityEnum.AUTO],
+        tasks=[TaskTypeEnum.OPTICAL_SAR_LANDCOVER],
+        status="available",
+        environment="Local PyTorch (CPU/MPS)",
+        description="Dual-encoder Optical (10-band S2) + SAR (2-band S1 VV/VH) ResNet18 fusion classifier (16 BigEarthNet classes).",
+        isDemo=False
     )
 ]
 
@@ -62,13 +84,18 @@ class ModelRegistryService:
         return None
 
     def get_default_model(self, task: TaskTypeEnum) -> ModelInfoSchema:
-        if task == TaskTypeEnum.CHANGE_ANALYSIS:
+        if task == TaskTypeEnum.OPTICAL_LANDCOVER:
+            return REGISTERED_MODELS[4]
+        elif task == TaskTypeEnum.OPTICAL_SAR_LANDCOVER:
+            return REGISTERED_MODELS[5]
+        elif task == TaskTypeEnum.CHANGE_ANALYSIS:
             return REGISTERED_MODELS[3]
         elif task in [TaskTypeEnum.VQA, TaskTypeEnum.CAPTION, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING]:
             return REGISTERED_MODELS[0]
         elif task in [TaskTypeEnum.DETECTION, TaskTypeEnum.SEGMENTATION]:
             return REGISTERED_MODELS[1]
         return REGISTERED_MODELS[0]
+
 
 
 model_registry = ModelRegistryService()
