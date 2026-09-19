@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, List
 import torch
 import torch.nn as nn
 
-from ..models.pytorch_models import MultispectralResNet18, SAROpticalFusionResNet18
+from ..models.pytorch_models import MultispectralResNet18, SAROpticalFusionResNet18, SiameseResNet18CD
 from ..core.logging import logger
 
 # Model artifact search paths
@@ -121,12 +121,44 @@ class RemoteSensingModelRegistry:
             return model
 
         elif model_key == "bitemporal_change":
-            # Modular holder: check if trained bi-temporal checkpoint exists
-            temporal_ckpt = _find_file("satquery_bitemporal_change.pt", [DEFAULT_WEIGHTS_DIR])
+            # Search for Model 3 checkpoint
+            temporal_ckpt = _find_file("satquery_bitemporal_levircd_resnet18_final.pt", [FALLBACK_OPTICAL_DIR])
+            if not temporal_ckpt:
+                temporal_ckpt = _find_file("satquery_bitemporal_change.pt", [FALLBACK_OPTICAL_DIR])
+
             if temporal_ckpt and temporal_ckpt.exists():
-                logger.info("Discovered newly trained bi-temporal checkpoint at %s", temporal_ckpt)
-                # Future: load trained temporal model architecture
-                return None
+                logger.info("Lazy-loading Model 3 (Siamese ResNet18 Change Detection) from %s", temporal_ckpt)
+                model = SiameseResNet18CD()
+                checkpoint = torch.load(temporal_ckpt, map_location="cpu")
+                state_dict = checkpoint.get("state_dict", checkpoint)
+                model.load_state_dict(state_dict)
+                model.eval()
+                self._models[model_key] = model
+
+                # Load config if available
+                config_path = _find_file("satquery_bitemporal_levircd_config.json", [])
+                config_meta = {}
+                if config_path and config_path.exists():
+                    try:
+                        with open(config_path, "r") as f:
+                            config_meta = json.load(f)
+                    except Exception:
+                        pass
+
+                self._metadata[model_key] = {
+                    "name": checkpoint.get("model_name", config_meta.get("model_name", "SatQuery-BiTemporal-LEVIRCD-ResNet18")),
+                    "model_type": checkpoint.get("model_type", config_meta.get("model_type", "siamese_resnet18_change_detection")),
+                    "task": checkpoint.get("task", "bi_temporal_change_detection"),
+                    "dataset": checkpoint.get("dataset", config_meta.get("dataset", "LEVIR-CD+")),
+                    "image_size": checkpoint.get("input_size", 256),
+                    "channels": checkpoint.get("channels", 3),
+                    "decision_threshold": float(checkpoint.get("decision_threshold", config_meta.get("decision_threshold", 0.2))),
+                    "best_validation_change_f1": checkpoint.get("best_validation_change_f1"),
+                    "test_loss": checkpoint.get("test_loss"),
+                    "test_change_f1": checkpoint.get("test_change_f1"),
+                    "test_iou": checkpoint.get("test_iou"),
+                }
+                return model
             else:
                 # Returns None to indicate modular fallback to classical change baseline
                 return None
@@ -161,10 +193,12 @@ MODEL_REGISTRY = {
         "description": "Dual-encoder ResNet18 Optical (S2) + SAR (S1 VV/VH) multimodal land-cover classifier."
     },
     "bitemporal_change": {
-        "name": "Bi-temporal Change Detection Engine",
+        "name": "SatQuery-BiTemporal-LEVIRCD-ResNet18",
         "type": "change_analysis",
         "modality": "optical",
+        "channels": 3,
+        "input_size": 256,
         "get_model": lambda: rs_model_registry.get_model("bitemporal_change"),
-        "description": "Modular bi-temporal change analysis engine (classical baseline / trained checkpoint adapter)."
+        "description": "Siamese ResNet18 bi-temporal building & land change detector trained on LEVIR-CD+ (256x256 dual-temporal)."
     }
 }

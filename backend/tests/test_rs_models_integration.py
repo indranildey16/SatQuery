@@ -180,3 +180,30 @@ def test_6_no_fake_spatial_localization_returned_by_classification_models(client
     findings = results.get("findings", [])
     assert len(findings) > 0
     assert any("confidence" in f.lower() or "notice" in f.lower() for f in findings)
+
+
+def test_7_bitemporal_model3_siamese_resnet18_predictions(client):
+    """7. Model 3: Siamese ResNet18 change detection model executes real bi-temporal inference."""
+    b_buf = create_test_image((50, 80, 120))
+    a_buf = create_test_image((220, 90, 40))
+
+    resp = client.post(
+        "/api/v1/analyses/infer",
+        files={
+            "image_before": ("before.jpg", b_buf.getvalue(), "image/jpeg"),
+            "image_after": ("after.jpg", a_buf.getvalue(), "image/jpeg")
+        },
+        data={"query": "Detect building changes between before and after", "task": "bitemporal_change"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["task_type"] == "bitemporal_change"
+    assert "SatQuery-BiTemporal-LEVIRCD-ResNet18" in data["model"]
+    assert "details" in data
+    assert "visualizations" in data["details"]
+    assert "maskDataUrl" in data["details"]["visualizations"]
+    assert "overlayDataUrl" in data["details"]["visualizations"]
+    assert "statistics" in data["details"]
+    assert data["details"]["statistics"]["method"]["type"] == "siamese_resnet18_deep_learning"
+    assert data["details"]["statistics"]["method"]["dataset"] == "LEVIR-CD+"
+

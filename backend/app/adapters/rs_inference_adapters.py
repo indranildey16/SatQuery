@@ -18,6 +18,7 @@ import os
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from PIL import Image
+import cv2
 import numpy as np
 import torch
 
@@ -290,12 +291,165 @@ def run_bitemporal_change(
 ) -> Dict[str, Any]:
     """
     Execute Bi-temporal Change Detection.
-    Modular design: currently utilizes verified classical change detection baseline.
-    When newly trained bi-temporal deep learning checkpoint finishes training, it can be loaded transparently.
+    If deep learning Model 3 (Siamese ResNet-18 trained on LEVIR-CD+) is available,
+    executes deep neural change segmentation. Otherwise falls back to the classical baseline.
     """
     start_time = time.time()
     trace = []
 
+    model = None
+    try:
+        model = MODEL_REGISTRY["bitemporal_change"]["get_model"]()
+    except Exception as e:
+        logger.warning(f"Could not load neural change detection model: {e}")
+
+    if model is not None:
+        meta = rs_model_registry.get_metadata("bitemporal_change")
+
+        # 1. Validation and alignment
+        t0 = time.time()
+        dims_b, dims_a = change_detection_service.validate_change_inputs(before_path, after_path)
+        with Image.open(before_path) as p_b:
+            arr_b = np.array(p_b.convert("RGB"))
+        with Image.open(after_path) as p_a:
+            arr_a = np.array(p_a.convert("RGB"))
+
+        aligned_b, aligned_a, alignment_info = change_detection_service.align_images(arr_b, arr_a)
+        trace.append({
+            "stage": "IMAGE_ALIGNMENT",
+            "durationMs": int((time.time() - t0) * 1000),
+            "details": f"Aligned inputs to {alignment_info['workingDimensions']} via {alignment_info['method']}"
+        })
+
+        # 2. Preprocessing for Siamese ResNet18 (256x256, ImageNet normalized)
+        t1 = time.time()
+        target_size = int(meta.get("image_size", 256))
+        img_b_256 = cv2.resize(aligned_b, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+        img_a_256 = cv2.resize(aligned_a, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+
+        t1_arr = np.array(img_b_256, dtype=np.float32) / 255.0
+        t2_arr = np.array(img_a_256, dtype=np.float32) / 255.0
+
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        t1_norm = (t1_arr - mean) / std
+        t2_norm = (t2_arr - mean) / std
+
+        t1_tensor = torch.from_numpy(t1_norm).permute(2, 0, 1).unsqueeze(0).float()
+        t2_tensor = torch.from_numpy(t2_norm).permute(2, 0, 1).unsqueeze(0).float()
+
+        trace.append({
+            "stage": "INPUT_PREPROCESSING",
+            "durationMs": int((time.time() - t1) * 1000),
+            "details": f"Constructed dual-temporal tensors (1, 3, {target_size}, {target_size}) with ImageNet normalization"
+        })
+
+        # 3. Model Inference
+        t2 = time.time()
+        with torch.no_grad():
+            logits = model(t1_tensor, t2_tensor)
+            probs_256 = torch.sigmoid(logits)[0, 0].cpu().numpy()
+
+        trace.append({
+            "stage": "NEURAL_CHANGE_INFERENCE",
+            "durationMs": int((time.time() - t2) * 1000),
+            "details": "Evaluated Siamese ResNet-18 dual-encoder change probability map"
+        })
+
+        # 4. Resize probability map back to aligned working dimensions
+        h_work, w_work = aligned_a.shape[:2]
+        probs_work = cv2.resize(probs_256, (w_work, h_work), interpolation=cv2.INTER_LINEAR)
+
+        # 5. Thresholding & Connected-Component Extraction
+        threshold = float(meta.get("decision_threshold", 0.20))
+        raw_mask = (probs_work >= threshold).astype(np.uint8)
+
+        # Morphological opening/closing to eliminate isolated sensor noise
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        opened = cv2.morphologyEx(raw_mask, cv2.MORPH_OPEN, kernel_open)
+        cleaned_mask = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel_close)
+
+        min_area_pixels = 25
+        regions, filtered_mask = change_detection_service.extract_changed_regions(
+            cleaned_mask, min_area_pixels=min_area_pixels
+        )
+
+        # 6. Statistics
+        stats = change_detection_service.compute_change_statistics(
+            filtered_mask, regions, threshold=threshold, min_area_pixels=min_area_pixels
+        )
+        stats["method"] = {
+            "type": "siamese_resnet18_deep_learning",
+            "model_name": meta.get("name", "SatQuery-BiTemporal-LEVIRCD-ResNet18"),
+            "dataset": meta.get("dataset", "LEVIR-CD+"),
+            "decision_threshold": threshold,
+            "validation_f1": meta.get("best_validation_change_f1"),
+            "test_f1": meta.get("test_change_f1"),
+            "test_iou": meta.get("test_iou"),
+        }
+
+        # 7. Visualizations
+        visualizations = change_detection_service.build_change_visualizations(
+            aligned_a, filtered_mask, regions
+        )
+
+        # 8. Summary & Findings
+        pct = stats["changePercentage"]
+        region_count = stats["changedRegionCount"]
+        changed_px = stats["changedPixelCount"]
+        total_px = stats["totalValidPixelCount"]
+
+        answer = (
+            f"Deep learning bi-temporal change analysis (Siamese ResNet-18) detected {region_count} "
+            f"changed spatial regions, covering {pct}% of the surveyed area ({changed_px:,} changed pixels). "
+            f"Model trained on the LEVIR-CD+ building & land change benchmark (Test F1: {meta.get('test_change_f1', 0.304):.3f}, IoU: {meta.get('test_iou', 0.179):.3f})."
+        )
+
+        findings = [
+            f"Neural Siamese change detection identified {region_count} distinct changed areas.",
+            f"Total changed surface footprint covers {pct}% ({changed_px:,} pixels) of working resolution.",
+            f"Model applied calibrated decision threshold of {threshold:.2f} optimized on LEVIR-CD+.",
+            "Observation verified by deep spatial differencing across multi-scale convolutional feature maps."
+        ]
+
+        details = {
+            "alignment": alignment_info,
+            "statistics": stats,
+            "regions": regions,
+            "visualizations": visualizations,
+            "summary": answer,
+            "findings": findings
+        }
+
+        total_ms = int((time.time() - start_time) * 1000)
+        return {
+            "task_type": "bitemporal_change",
+            "answer": answer,
+            "model": meta.get("name", "SatQuery-BiTemporal-LEVIRCD-ResNet18"),
+            "inputs": {
+                "before": Path(before_path).name,
+                "after": Path(after_path).name,
+                "workingDimensions": alignment_info["workingDimensions"],
+                "model_input_size": f"{target_size}x{target_size}"
+            },
+            "predictions": [f"Changed Regions ({region_count} detected)"],
+            "scores": {
+                "change_percentage": pct,
+                "decision_threshold": threshold,
+                "test_change_f1": meta.get("test_change_f1"),
+                "test_iou": meta.get("test_iou")
+            },
+            "execution_trace": trace,
+            "processing_time_ms": total_ms,
+            "warnings": [
+                "Neural Change Note: Model trained on LEVIR-CD+ building & land change detection dataset.",
+                f"Calibrated Threshold: Binary change mask generated at threshold {threshold:.2f}."
+            ],
+            "details": details
+        }
+
+    # Fallback to classical change detection baseline
     t0 = time.time()
     res = change_detection_service.run_change_detection(before_path, after_path)
     duration_calc = int((time.time() - t0) * 1000)

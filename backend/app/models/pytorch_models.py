@@ -93,3 +93,89 @@ class SAROpticalFusionResNet18(nn.Module):
         sar_feat = self.sar(sar)
         fused = torch.cat([opt_feat, sar_feat], dim=1)
         return self.fusion(fused)
+
+
+class SiameseResNet18CD(nn.Module):
+    """
+    Siamese ResNet-18 Bi-Temporal Change Detection Network (LEVIR-CD+).
+    Features dual-temporal shared ResNet18 encoder, multi-scale absolute feature differencing,
+    and a top-down decoder with skip connections to output a single-channel binary change logit map.
+    """
+    def __init__(self):
+        super().__init__()
+        base = models.resnet18()
+        self.encoder = nn.Module()
+        self.encoder.conv1 = base.conv1
+        self.encoder.bn1 = base.bn1
+        self.encoder.relu = base.relu
+        self.encoder.maxpool = base.maxpool
+        self.encoder.layer1 = base.layer1
+        self.encoder.layer2 = base.layer2
+        self.encoder.layer3 = base.layer3
+        self.encoder.layer4 = base.layer4
+
+        self.decoder = nn.Module()
+        self.decoder.block4 = nn.Sequential(
+            nn.Conv2d(512, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True)
+        )
+        self.decoder.block3 = nn.Sequential(
+            nn.Conv2d(512, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True)
+        )
+        self.decoder.block2 = nn.Sequential(
+            nn.Conv2d(256, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+        self.decoder.block1 = nn.Sequential(
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+        self.decoder.final = nn.Sequential(
+            nn.Conv2d(64, 32, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 1, kernel_size=1)
+        )
+
+    def extract_features(self, x: torch.Tensor):
+        x = self.encoder.conv1(x)
+        x = self.encoder.bn1(x)
+        x = self.encoder.relu(x)
+        x = self.encoder.maxpool(x)
+        f1 = self.encoder.layer1(x)
+        f2 = self.encoder.layer2(f1)
+        f3 = self.encoder.layer3(f2)
+        f4 = self.encoder.layer4(f3)
+        return f1, f2, f3, f4
+
+    def forward(self, t1: torch.Tensor, t2: torch.Tensor) -> torch.Tensor:
+        orig_h, orig_w = t1.shape[2:]
+        t1_f1, t1_f2, t1_f3, t1_f4 = self.extract_features(t1)
+        t2_f1, t2_f2, t2_f3, t2_f4 = self.extract_features(t2)
+
+        d4 = torch.abs(t1_f4 - t2_f4)
+        d3 = torch.abs(t1_f3 - t2_f3)
+        d2 = torch.abs(t1_f2 - t2_f2)
+        d1 = torch.abs(t1_f1 - t2_f1)
+
+        x = self.decoder.block4(d4)
+        x = nn.functional.interpolate(x, size=d3.shape[2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, d3], dim=1)
+
+        x = self.decoder.block3(x)
+        x = nn.functional.interpolate(x, size=d2.shape[2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, d2], dim=1)
+
+        x = self.decoder.block2(x)
+        x = nn.functional.interpolate(x, size=d1.shape[2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, d1], dim=1)
+
+        x = self.decoder.block1(x)
+        x = self.decoder.final(x)
+        x = nn.functional.interpolate(x, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+        return x
+

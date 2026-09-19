@@ -18,3 +18,5 @@ class UnifiedInferenceResponse(BaseModel):
     execution_trace: List[Dict[str, Any]] = Field(default_factory=list, description="Pipeline stage telemetry and timing breakdown")
     processing_time_ms: int = Field(..., description="Total wall-clock inference latency in milliseconds")
     warnings: List[str] = Field(default_factory=list, description="Advisories, warnings, or missing input notices")
+    details: Optional[Dict[str, Any]] = Field(None, description="Detailed metrics, spatial masks, and region telemetry for change analysis")
+

@@ -69,6 +69,17 @@ REGISTERED_MODELS: List[ModelInfoSchema] = [
         environment="Local PyTorch (CPU/MPS)",
         description="Dual-encoder Optical (10-band S2) + SAR (2-band S1 VV/VH) ResNet18 fusion classifier (16 BigEarthNet classes).",
         isDemo=False
+    ),
+    ModelInfoSchema(
+        id="satquery-bitemporal-levircd",
+        name="SatQuery-BiTemporal-LEVIRCD-ResNet18",
+        version="1.0-SiameseResNet18",
+        modality=[ModalityEnum.OPTICAL, ModalityEnum.AUTO],
+        tasks=[TaskTypeEnum.CHANGE_ANALYSIS],
+        status="available",
+        environment="Local PyTorch (CPU/MPS)",
+        description="Siamese ResNet18 bi-temporal building & land change detector trained on LEVIR-CD+ (256x256 dual-temporal).",
+        isDemo=False
     )
 ]
 
@@ -85,15 +96,15 @@ class ModelRegistryService:
 
     def get_default_model(self, task: TaskTypeEnum) -> ModelInfoSchema:
         if task == TaskTypeEnum.OPTICAL_LANDCOVER:
-            return REGISTERED_MODELS[4]
+            return self.get_model_by_id("satquery-ben14k-optical") or REGISTERED_MODELS[4]
         elif task == TaskTypeEnum.OPTICAL_SAR_LANDCOVER:
-            return REGISTERED_MODELS[5]
+            return self.get_model_by_id("satquery-sar-optical-fusion") or REGISTERED_MODELS[5]
         elif task == TaskTypeEnum.CHANGE_ANALYSIS:
-            return REGISTERED_MODELS[3]
+            return self.get_model_by_id("satquery-bitemporal-levircd") or REGISTERED_MODELS[3]
         elif task in [TaskTypeEnum.VQA, TaskTypeEnum.CAPTION, TaskTypeEnum.CAPTIONING, TaskTypeEnum.SCENE_UNDERSTANDING]:
-            return REGISTERED_MODELS[0]
+            return self.get_model_by_id("qwen2.5-vl-3b") or REGISTERED_MODELS[0]
         elif task in [TaskTypeEnum.DETECTION, TaskTypeEnum.SEGMENTATION]:
-            return REGISTERED_MODELS[1]
+            return self.get_model_by_id("deeplab-yolov8-fusion") or REGISTERED_MODELS[1]
         return REGISTERED_MODELS[0]
 
 

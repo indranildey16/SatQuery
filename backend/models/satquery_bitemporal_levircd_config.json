@@ -1,0 +1,27 @@
+{
+  "model_name": "SatQuery-BiTemporal-LEVIRCD-ResNet18",
+  "model_type": "siamese_resnet18_change_detection",
+  "task": "bi_temporal_change_detection",
+  "dataset": "LEVIR-CD+",
+  "input": {
+    "t1": "RGB image",
+    "t2": "RGB image",
+    "channels": 3,
+    "size": 256
+  },
+  "output": {
+    "type": "binary_change_mask",
+    "classes": {
+      "0": "unchanged",
+      "1": "changed"
+    }
+  },
+  "decision_threshold": 0.2,
+  "metrics": {
+    "best_validation_change_f1": 0.23086482779247433,
+    "test_loss": 2.867643235743731,
+    "test_change_f1": 0.3041915765135855,
+    "test_iou": 0.17937850307890188
+  },
+  "checkpoint": "satquery_bitemporal_levircd_resnet18_final.pt"
+}
