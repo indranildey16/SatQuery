@@ -15,7 +15,12 @@ class InferenceOrchestrator:
     def __init__(self, adapter: Optional[BaseInferenceAdapter] = None):
         if adapter:
             self._adapter = adapter
-        elif settings.INFERENCE_MODE.lower() == "colab":
+            logger.info("Initialized InferenceOrchestrator with %s (mode=%s)", self._adapter.__class__.__name__, settings.INFERENCE_MODE)
+        else:
+            self.reload_adapter()
+
+    def reload_adapter(self) -> None:
+        if settings.INFERENCE_MODE.lower() == "colab":
             self._adapter = ColabInferenceAdapter(
                 colab_url=settings.COLAB_INFERENCE_URL,
                 token=settings.token,
@@ -23,8 +28,7 @@ class InferenceOrchestrator:
             )
         else:
             self._adapter = MockInferenceAdapter()
-            
-        logger.info("Initialized InferenceOrchestrator with %s (mode=%s)", self._adapter.__class__.__name__, settings.INFERENCE_MODE)
+        logger.info("Configured InferenceOrchestrator with %s (mode=%s)", self._adapter.__class__.__name__, settings.INFERENCE_MODE)
 
     @property
     def adapter(self) -> BaseInferenceAdapter:

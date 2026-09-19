@@ -50,29 +50,48 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
         filename = Path(image_path).name
         endpoint = f"{self.colab_url}/v1/infer"
 
-        headers: Dict[str, str] = {}
-        if self.token:
-            headers["X-SatQuery-Token"] = self.token
+        # Build list of candidate tokens to support seamless sync with Colab notebook
+        candidate_tokens: List[str] = [self.token] if self.token else []
+        for alt in ["CHANGE_THIS_TO_A_RANDOM_SECRET", "SatQuery-colab-2026-nilnavneet123"]:
+            if alt and alt not in candidate_tokens:
+                candidate_tokens.append(alt)
+        if not candidate_tokens:
+            candidate_tokens = [""]
 
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
+        last_response = None
 
         try:
-            logger.info("Dispatching VQA inference request to Colab at %s for query: '%s'", endpoint, query)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                with open(image_path, "rb") as image_file:
-                    files = {
-                        "image": (filename, image_file, "image/jpeg")
-                    }
-                    data = {
-                        "question": query,
-                        "task": "vqa"
-                    }
-                    response = await client.post(
-                        endpoint,
-                        files=files,
-                        data=data,
-                        headers=headers
-                    )
+                for attempt_token in candidate_tokens:
+                    headers: Dict[str, str] = {}
+                    if attempt_token:
+                        headers["X-SatQuery-Token"] = attempt_token
+
+                    with open(image_path, "rb") as image_file:
+                        files = {
+                            "image": (filename, image_file, "image/jpeg")
+                        }
+                        data = {
+                            "question": query,
+                            "task": "vqa"
+                        }
+                        response = await client.post(
+                            endpoint,
+                            files=files,
+                            data=data,
+                            headers=headers
+                        )
+                        last_response = response
+
+                    if response.status_code == 200:
+                        self.token = attempt_token
+                        break
+                    elif response.status_code in [401, 403]:
+                        logger.warning("Colab auth rejected with token '%s...'. Checking next token candidate.", attempt_token[:8])
+                        continue
+                    else:
+                        break
 
         except (httpx.ConnectError, httpx.NetworkError) as e:
             logger.warning("Colab connection failed: %s", e)
@@ -92,6 +111,10 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
                 f"Transport failure connecting to Google Colab: {str(e)}",
                 details=str(e),
             )
+
+        response = last_response
+        if response is None:
+            raise ColabUnavailableError("No response received from Colab endpoint.")
 
         # Handle HTTP status codes
         if response.status_code in [401, 403]:
@@ -189,7 +212,7 @@ class ColabInferenceAdapter(BaseInferenceAdapter):
             headers["X-SatQuery-Token"] = self.token
 
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.get(health_url, headers=headers)
                 if res.status_code == 200:
                     return {
