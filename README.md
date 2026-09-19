@@ -1,32 +1,92 @@
-# React + TypeScript + Vite
+# SatQuery AI · Remote-Sensing Image Intelligence
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+SatQuery AI (`v2.4-ORBIT`) is a high-performance geospatial intelligence web application and API gateway designed for remote-sensing imagery analysis, Visual Question Answering (VQA), and scene interpretation.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 1. System Architecture
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+React Frontend (Vite + Tailwind / TypeScript) [Port 5173]
+        ↓  REST API (Multipart Image / JSON)
+FastAPI Backend Gateway (Python 3.12) [Port 8000]
+        ↓
+Analysis Service (Asynchronous Pipeline Stages)
+        ↓
+Inference Orchestrator
+        ↓
+Inference Adapter:
+  ├── MockInferenceAdapter (Deterministic local reference data)
+  └── ColabInferenceAdapter (Live remote GPU inference bridge)
+            ↓  Cloudflare / ngrok Tunnel (HTTPS + Token Auth)
+      Google Colab Worker (Tesla T4 GPU)
+            ↓
+      Qwen/Qwen2.5-VL-3B-Instruct
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+---
+
+## 2. Operation Modes
+
+SatQuery AI supports two distinct execution configurations:
+
+### Mode A: Local Mock Mode (Fully Offline)
+- **Frontend**: `VITE_USE_MOCK_API=false` (calls local FastAPI) or `VITE_USE_MOCK_API=true` (client-side simulation).
+- **Backend**: `INFERENCE_MODE=mock`.
+- **Behavior**: Analyses execute deterministically in ~1.5s using reference Sentinel-2 and port assessment assets. Zero GPU or internet connection required.
+
+### Mode B: Real GPU Inference via Google Colab
+- **Frontend**: `VITE_USE_MOCK_API=false` (calls local FastAPI).
+- **Backend**: `INFERENCE_MODE=colab`.
+- **Behavior**: Imagery and queries are uploaded from React to the Mac FastAPI backend, forwarded securely across an authenticated tunnel to a remote Google Colab GPU instance running `Qwen/Qwen2.5-VL-3B-Instruct`, and returned as structured analytical findings.
+
+---
+
+## 3. Quickstart & Development
+
+### 3.1 Backend Setup (FastAPI)
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit backend/.env with your settings
+
+# Run automated tests
+pytest tests -v
+
+# Start backend server
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Backend URLs:
+- API Root: `http://localhost:8000`
+- Interactive Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- OpenAPI Schema: `http://localhost:8000/openapi.json`
+- Inference Health: `http://localhost:8000/health/inference`
+
+### 3.2 Frontend Setup (React + Vite)
+```bash
+npm install
+npm run build
+npm run dev
+```
+
+Frontend URL: `http://localhost:5173`
+
+---
+
+## 4. Documentation
+- [API Integration Guide](docs/API_INTEGRATION.md) — Detailed schema and REST endpoint contracts.
+- [Google Colab Integration Guide](docs/COLAB_INTEGRATION.md) — Server receiver code and GPU worker deployment instructions.
+
+---
+
+## 5. Security & Privacy
+- Sensitive tokens (`COLAB_INFERENCE_TOKEN`, `SATQUERY_TOKEN`) and tunnel URLs are kept strictly in backend environment files (`backend/.env`).
+- Environment configuration files (`.env`) are excluded from Git via `.gitignore`.
+- React frontend clients never communicate directly with the Colab tunnel or receive worker authentication credentials.

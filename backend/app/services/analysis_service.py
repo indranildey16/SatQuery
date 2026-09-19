@@ -215,6 +215,7 @@ class AnalysisService:
         accumulated_stages: List[ExecutionTraceItemSchema] = []
 
         try:
+            inference_res = None
             for stage_enum, progress_pct, delay_ms, desc in PIPELINE_STAGES:
                 stage_start = time.time()
                 await analysis_store.update_status(
@@ -225,16 +226,24 @@ class AnalysisService:
                     updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
 
-                # Small delay simulating async execution
-                await asyncio.sleep(delay_ms / 1000.0)
-
-                stage_duration = int((time.time() - stage_start) * 1000)
                 detail_text = desc
                 if stage_enum == PipelineStageEnum.MODEL_SELECTION:
                     detail_text = f"Selected target model: {model_info.name}"
+                    await asyncio.sleep(delay_ms / 1000.0)
                 elif stage_enum == PipelineStageEnum.MODEL_INFERENCE:
                     detail_text = f"Inference executed using {model_info.name} for {task_enum.value}"
+                    if task_enum in [TaskTypeEnum.VQA, TaskTypeEnum.SCENE_UNDERSTANDING]:
+                        inference_res = await inference_orchestrator.execute_vqa(file_path, query)
+                    elif task_enum == TaskTypeEnum.CAPTIONING:
+                        inference_res = await inference_orchestrator.execute_caption(file_path)
+                    elif task_enum == TaskTypeEnum.CHANGE_ANALYSIS:
+                        inference_res = await inference_orchestrator.execute_change([file_path])
+                    else:
+                        inference_res = await inference_orchestrator.execute_vqa(file_path, query)
+                else:
+                    await asyncio.sleep(delay_ms / 1000.0)
 
+                stage_duration = int((time.time() - stage_start) * 1000)
                 accumulated_stages.append(
                     ExecutionTraceItemSchema(
                         stage=stage_enum.value,
@@ -245,15 +254,8 @@ class AnalysisService:
                     )
                 )
 
-            # Perform inference via orchestrator
-            if task_enum in [TaskTypeEnum.VQA, TaskTypeEnum.SCENE_UNDERSTANDING]:
-                inference_res = await inference_orchestrator.execute_vqa(file_path, query)
-            elif task_enum == TaskTypeEnum.CAPTIONING:
-                inference_res = await inference_orchestrator.execute_caption(file_path)
-            elif task_enum == TaskTypeEnum.CHANGE_ANALYSIS:
-                inference_res = await inference_orchestrator.execute_change([file_path])
-            else:
-                inference_res = await inference_orchestrator.execute_vqa(file_path, query)
+            if inference_res is None:
+                raise InferenceAdapterError("INFERENCE_FAILED", "No inference result generated.")
 
             total_runtime = round(time.time() - start_time, 2)
             metrics_dict = inference_res.metrics or {}

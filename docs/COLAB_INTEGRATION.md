@@ -183,8 +183,8 @@ INFERENCE_MODE=colab
 COLAB_INFERENCE_URL=https://your-tunnel-id.ngrok-free.app
 
 # Private token matching COLAB_AUTH_TOKEN in the Colab notebook
-COLAB_INFERENCE_TOKEN=SatQuery-colab-2026-nilnavneet123
-SATQUERY_TOKEN=SatQuery-colab-2026-nilnavneet123
+COLAB_INFERENCE_TOKEN=your-private-secure-token
+SATQUERY_TOKEN=your-private-secure-token
 
 # Maximum seconds to wait for model inference (default: 120s)
 TIMEOUT_SECONDS=120
