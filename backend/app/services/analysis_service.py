@@ -32,6 +32,7 @@ from ..schemas.analysis import (
 from ..storage.in_memory import analysis_store, save_uploaded_file
 from .model_registry import model_registry
 from .inference_service import inference_orchestrator
+from ..adapters.exceptions import InferenceAdapterError
 from ..core.config import settings
 from ..core.logging import logger
 
@@ -255,6 +256,9 @@ class AnalysisService:
                 inference_res = await inference_orchestrator.execute_vqa(file_path, query)
 
             total_runtime = round(time.time() - start_time, 2)
+            metrics_dict = inference_res.metrics or {}
+            runtime_ms = metrics_dict.get("runtimeMs") or int(total_runtime * 1000)
+            confidence_label = metrics_dict.get("confidenceLabel") or "Not calibrated (Colab VQA)"
 
             # Build result data schema
             results = AnalysisResultDataSchema(
@@ -266,22 +270,33 @@ class AnalysisService:
                 visualizations=[VisualizationLayerSchema(**v) for v in inference_res.visualizations],
                 geojson=inference_res.geojson,
                 metrics=AnalysisMetricsSchema(
-                    runtimeMs=int(total_runtime * 1000),
-                    confidenceScore=None,
-                    confidenceLabel="Not calibrated (Demo)",
-                    detectedVessels=0,
-                    cloudOcclusionPercent=5.0
+                    runtimeMs=runtime_ms,
+                    confidenceScore=metrics_dict.get("confidenceScore"),
+                    confidenceLabel=confidence_label,
+                    detectedVessels=metrics_dict.get("detectedVessels", 0),
+                    dockFootprintKm2=metrics_dict.get("dockFootprintKm2"),
+                    sedimentPlumeKm2=metrics_dict.get("sedimentPlumeKm2"),
+                    cloudOcclusionPercent=metrics_dict.get("cloudOcclusionPercent", 5.0),
+                    ndwiIndex=metrics_dict.get("ndwiIndex")
                 )
             )
+
+            is_colab = settings.INFERENCE_MODE.lower() == "colab"
+            evidence_note = (
+                "Observations derived via remote multimodal attention token alignment on Tesla T4 GPU."
+                if is_colab
+                else "Observations derived via vision-language spatial tokens."
+            )
+            confidence_note = "Confidence is uncalibrated for demo VQA outputs."
 
             trace = ExecutionTraceSchema(
                 inputCount=1,
                 task=task_enum.value,
-                model=model_info.name,
+                model=inference_res.model_name or model_info.name,
                 status=AnalysisStatusEnum.COMPLETED,
                 runtimeSeconds=total_runtime,
-                confidenceNote="Confidence is uncalibrated for demo VQA outputs.",
-                evidenceNote="Observations derived via vision-language spatial tokens.",
+                confidenceNote=confidence_note,
+                evidenceNote=evidence_note,
                 stages=accumulated_stages
             )
 
@@ -296,6 +311,38 @@ class AnalysisService:
             )
             logger.info("Completed analysis %s in %.2fs", analysis_id, total_runtime)
 
+        except InferenceAdapterError as e:
+            logger.warning("Inference adapter error for analysis %s: [%s] %s", analysis_id, e.code, e.message)
+            total_runtime = round(time.time() - start_time, 2)
+            accumulated_stages.append(
+                ExecutionTraceItemSchema(
+                    stage="INFERENCE_FAILED",
+                    timestamp=datetime.now().strftime("%H:%M:%S"),
+                    durationMs=int(total_runtime * 1000),
+                    status="failed",
+                    details=f"[{e.code}] {e.message}"
+                )
+            )
+            failed_trace = ExecutionTraceSchema(
+                inputCount=1,
+                task=task_enum.value,
+                model=model_info.name,
+                status=AnalysisStatusEnum.FAILED,
+                runtimeSeconds=total_runtime,
+                confidenceNote="Inference aborted due to worker failure.",
+                evidenceNote=f"Failure code: {e.code}",
+                stages=accumulated_stages
+            )
+            await analysis_store.update_status(
+                analysis_id=analysis_id,
+                status=AnalysisStatusEnum.FAILED.value,
+                progress=0,
+                stage="FAILED",
+                trace=failed_trace,
+                error=e.message,
+                error_code=e.code,
+                updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
         except Exception as e:
             logger.exception("Failed processing analysis %s: %s", analysis_id, e)
             await analysis_store.update_status(
@@ -303,6 +350,8 @@ class AnalysisService:
                 status=AnalysisStatusEnum.FAILED.value,
                 progress=0,
                 stage="FAILED",
+                error=str(e),
+                error_code="INTERNAL_SERVER_ERROR",
                 updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             )
 

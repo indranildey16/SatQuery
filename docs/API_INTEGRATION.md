@@ -354,3 +354,34 @@ VITE_USE_MOCK_API=false
    - All operations are handled in-memory and persisted to browser `localStorage`.
    - Toggleable at runtime via the `API MOCK` switch in the application topbar.
    - Preserves offline development capability without requiring the Python backend.
+
+---
+
+## 7. Google Colab Inference Adapter (Stage 5A)
+
+Stage 5A introduces `ColabInferenceAdapter`, enabling the FastAPI gateway to route multimodal requests to a remote GPU worker running `Qwen2.5-VL-3B-Instruct`.
+
+### Operational Modes
+- `INFERENCE_MODE=mock`: Uses `MockInferenceAdapter` (zero network calls, deterministic reference data).
+- `INFERENCE_MODE=colab`: Uses `ColabInferenceAdapter` (dispatches multipart HTTP to remote Colab worker).
+
+### Inference Health Check
+`GET /health/inference`
+
+**Response (`200 OK`)**:
+```json
+{
+  "status": "healthy",
+  "inference_mode": "mock",
+  "adapter": "MockInferenceAdapter",
+  "is_colab": false,
+  "colab_configured": null,
+  "remote_worker": {
+    "configured": true,
+    "reachable": true,
+    "status": "healthy (mock adapter)"
+  }
+}
+```
+
+See [COLAB_INTEGRATION.md](./COLAB_INTEGRATION.md) for full server script templates and tunnel instructions.

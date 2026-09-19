@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     INFERENCE_MODE: str = "mock"
+    COLAB_INFERENCE_URL: str = ""
+    COLAB_INFERENCE_TOKEN: str = ""
+    TIMEOUT_SECONDS: int = 120
     MAX_UPLOAD_SIZE_MB: int = 50
     UPLOAD_DIR: str = "./data/uploads"
     

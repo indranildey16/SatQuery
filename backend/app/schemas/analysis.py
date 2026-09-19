@@ -124,6 +124,8 @@ class AnalysisDetailResponse(BaseModel):
     model: ModelInfoSchema
     results: Optional[AnalysisResultDataSchema] = None
     trace: Optional[ExecutionTraceSchema] = None
+    error: Optional[str] = None
+    errorCode: Optional[str] = None
     createdAt: str
     updatedAt: str
 
@@ -140,3 +142,5 @@ class AnalysisStatusResponse(BaseModel):
     progress: Optional[int] = None
     stage: Optional[str] = None
     currentStage: Optional[str] = None
+    error: Optional[str] = None
+    errorCode: Optional[str] = None

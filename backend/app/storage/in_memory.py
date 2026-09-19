@@ -45,6 +45,8 @@ class InMemoryAnalysisStore:
         stage: str,
         results: Optional[Any] = None,
         trace: Optional[Any] = None,
+        error: Optional[str] = None,
+        error_code: Optional[str] = None,
         updated_at: Optional[str] = None
     ) -> Optional[AnalysisDetailResponse]:
         async with self._lock:
@@ -60,6 +62,10 @@ class InMemoryAnalysisStore:
                 item.results = results
             if trace is not None:
                 item.trace = trace
+            if error is not None:
+                item.error = error
+            if error_code is not None:
+                item.errorCode = error_code
             if updated_at is not None:
                 item.updatedAt = updated_at
             return item.model_copy(deep=True)

@@ -75,6 +75,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
+from .services.inference_service import inference_orchestrator
+
+
 @app.get("/health", tags=["System"])
 async def health_check():
     """System health check and operational telemetry."""
@@ -83,6 +86,21 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.APP_ENV,
         "inference_mode": settings.INFERENCE_MODE
+    }
+
+
+@app.get("/health/inference", tags=["System"])
+async def inference_health_check():
+    """Check status of the active inference orchestrator, adapter, and remote worker."""
+    adapter_info = inference_orchestrator.get_adapter_info()
+    health_status = await inference_orchestrator.check_health()
+    return {
+        "status": "healthy" if health_status.get("reachable") else "degraded",
+        "inference_mode": settings.INFERENCE_MODE,
+        "adapter": adapter_info["adapter"],
+        "is_colab": adapter_info["is_colab"],
+        "colab_configured": adapter_info["colab_url_configured"],
+        "remote_worker": health_status
     }
 
 
