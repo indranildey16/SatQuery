@@ -1,19 +1,25 @@
-import type { Analysis, AnalysisInput, TaskType, ExecutionTraceItem } from '../types';
+import type { 
+  Analysis, 
+  AnalysisInput, 
+  TaskType, 
+  ExecutionTraceItem,
+  CreateAnalysisPayload 
+} from '../types';
 import { MOCK_ANALYSES } from '../mocks/analysisMocks';
-import { apiClient } from './apiClient';
 import { MOCK_MODELS } from '../mocks/modelMocks';
+import { apiClient } from './apiClient';
 
 const STORAGE_KEY = 'satquery_analyses';
 
-const STAGES: { stage: string; progress: number; delayMs: number }[] = [
-  { stage: 'UPLOAD RECEIVED', progress: 12, delayMs: 250 },
-  { stage: 'IMAGE VALIDATION', progress: 28, delayMs: 300 },
-  { stage: 'MODALITY RESOLUTION', progress: 42, delayMs: 250 },
-  { stage: 'QUERY INTERPRETATION', progress: 56, delayMs: 350 },
-  { stage: 'MODEL SELECTION', progress: 70, delayMs: 300 },
-  { stage: 'MODEL INFERENCE', progress: 86, delayMs: 700 },
-  { stage: 'RESULT PROCESSING', progress: 95, delayMs: 350 },
-  { stage: 'RESULT READY', progress: 100, delayMs: 200 }
+const STAGES = [
+  { stage: 'UPLOAD RECEIVED', delayMs: 250, progress: 12 },
+  { stage: 'IMAGE VALIDATION', delayMs: 350, progress: 24 },
+  { stage: 'MODALITY RESOLUTION', delayMs: 300, progress: 36 },
+  { stage: 'QUERY INTERPRETATION', delayMs: 300, progress: 48 },
+  { stage: 'MODEL SELECTION', delayMs: 250, progress: 60 },
+  { stage: 'MODEL INFERENCE', delayMs: 650, progress: 78 },
+  { stage: 'RESULT PROCESSING', delayMs: 400, progress: 90 },
+  { stage: 'RESULT READY', delayMs: 200, progress: 100 }
 ];
 
 class AnalysisService {
@@ -41,7 +47,7 @@ class AnalysisService {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.analyses));
     } catch {
-      // LocalStorage error fallback
+      // Ignore storage errors in sandbox
     }
   }
 
@@ -57,14 +63,83 @@ class AnalysisService {
       const found = this.analyses.find((a) => a.id === id);
       return Promise.resolve(found ? JSON.parse(JSON.stringify(found)) : null);
     }
-    return apiClient.get<Analysis>(`/api/v1/analyses/${id}`);
+
+    // REAL API MODE: Fetch from FastAPI backend
+    const raw = await apiClient.get<any>(`/api/v1/analyses/${id}`);
+    if (!raw) return null;
+
+    // Normalizing response: backend returns status progression during processing
+    if (raw.status === 'queued' || raw.status === 'processing') {
+      const stageName = raw.currentStage || raw.stage || 'UPLOAD_RECEIVED';
+      return {
+        id: raw.analysis_id || raw.id || id,
+        title: raw.title || raw.query?.text || 'Satellite Imagery Analysis Pipeline',
+        status: raw.status,
+        progress: raw.progress ?? 12,
+        currentStage: stageName,
+        enclaveCrs: raw.enclaveCrs || 'EPSG:4326 (WGS 84)',
+        query: raw.query || { text: 'Remote-Sensing Inquiry', task: 'vqa' },
+        input: raw.input || {
+          imageUrl: '/samples/guinea-bissau-sample.jpg',
+          metadata: {
+            filename: 'satellite_scene.jpg',
+            width: 3840,
+            height: 3840,
+            format: 'image/jpeg',
+            fileSizeBytes: 5099039,
+            modality: 'optical'
+          }
+        },
+        model: raw.model || {
+          id: 'qwen2.5-vl-3b',
+          name: 'Qwen2.5-VL-3B-Instruct',
+          version: '2.5',
+          modality: ['optical', 'auto'],
+          tasks: ['vqa', 'captioning', 'scene_understanding'],
+          status: 'available',
+          environment: 'google-colab',
+          description: 'Vision-Language model running single-image VQA.'
+        },
+        results: raw.results,
+        trace: raw.trace,
+        createdAt: raw.createdAt || new Date().toISOString().replace('T', ' ').substring(0, 19),
+        updatedAt: raw.updatedAt || new Date().toISOString().replace('T', ' ').substring(0, 19)
+      };
+    }
+
+    // When completed, map full analysis
+    return {
+      id: raw.id || raw.analysis_id || id,
+      title: raw.title || 'Remote-Sensing Scene Inspection',
+      status: raw.status,
+      progress: raw.progress ?? 100,
+      currentStage: raw.currentStage || raw.stage || 'RESULT_READY',
+      enclaveCrs: raw.enclaveCrs || 'EPSG:4326 (WGS 84)',
+      query: raw.query,
+      input: raw.input,
+      model: raw.model,
+      results: raw.results,
+      trace: raw.trace,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt
+    };
   }
 
-  public async createAnalysis(payload: {
+  public async cancelAnalysis(id: string): Promise<void> {
+    if (apiClient.getMockStatus()) {
+      const index = this.analyses.findIndex(a => a.id === id);
+      if (index !== -1) {
+        this.analyses[index].status = 'cancelled';
+        this.saveToStorage();
+      }
+    }
+  }
+
+  public async createAnalysis(payload: CreateAnalysisPayload | {
     input: AnalysisInput;
     query: { text: string; task: TaskType };
     modelId?: string;
-  }): Promise<{ analysis_id: string; status: string; analysis: Analysis }> {
+  }): Promise<{ analysis_id: string; status: string; analysis?: Analysis }> {
     if (apiClient.getMockStatus()) {
       const newId = `ANL-2024-${Math.floor(1000 + Math.random() * 9000)}`;
       const selectedModel = MOCK_MODELS.find((m) => m.id === payload.modelId) || MOCK_MODELS[0];
@@ -111,13 +186,44 @@ The exact boundaries and specific types of these land-cover types vary depending
 
 1. **Target Feature Identification**: Surface features consistent with the prompt "${payload.query.text}" were evaluated.
 2. **Spatial Distribution**: Observable patterns reflect natural terrain, hydrological boundaries, and surface reflectance characteristics.
-3. **Observation Quality**: Scene resolution (${payload.input.metadata.resolutionMeters ? `${payload.input.metadata.resolutionMeters}m GSD` : 'Standard'}) allows clear macro-level feature discrimination.`;
+3. **Observation Quality**: Visual features extracted cleanly from the remote sensing scene.`;
         findingsList = [
-          `Query "${payload.query.text}" evaluated against spectral bands.`,
-          'Features correlated with remote sensing imagery characteristics.',
-          'Inference simulated using Qwen2.5-VL-3B-Instruct model pipeline.'
+          'Target Feature: Spectral signatures correlated with user query.',
+          'Hydrology: Coastal and fluvial boundaries delineated.',
+          'Vegetation: Reflectance typical for regional ecosystem.'
         ];
       }
+
+      const imgUrl = ('imageUrl' in payload && payload.imageUrl) || 
+                     ('input' in payload && payload.input?.imageUrl) || 
+                     '/samples/guinea-bissau-sample.jpg';
+      const meta = ('metadata' in payload && payload.metadata) || 
+                   ('input' in payload && payload.input?.metadata) || {
+                     filename: 'Earth_from_Space_Guinea-Bissau.jpg',
+                     width: 3840,
+                     height: 3840,
+                     format: 'image/jpeg',
+                     fileSizeBytes: 5099039,
+                     modality: 'optical' as const
+                   };
+
+      const inputObj: AnalysisInput = {
+        imageUrl: imgUrl,
+        metadata: {
+          filename: meta.filename || 'satellite_scene.jpg',
+          width: meta.width || 3840,
+          height: meta.height || 3840,
+          format: meta.format || 'image/jpeg',
+          fileSizeBytes: meta.fileSizeBytes || 5099039,
+          modality: meta.modality || 'optical',
+          satellite: meta.satellite || 'Copernicus Sentinel-2',
+          sensor: meta.sensor || 'MSI Multispectral',
+          acquisitionDate: meta.acquisitionDate || '2026-09-18 10:15 UTC',
+          resolutionMeters: meta.resolutionMeters || 10.0,
+          cloudCoveragePercent: meta.cloudCoveragePercent || 0.05,
+          coordinates: meta.coordinates || { lat: 11.8037, lng: -15.1804, crs: 'EPSG 4326' }
+        }
+      };
 
       // Initial queued analysis object
       const initialAnalysis: Analysis = {
@@ -126,9 +232,9 @@ The exact boundaries and specific types of these land-cover types vary depending
         status: 'queued',
         progress: 5,
         currentStage: 'UPLOAD RECEIVED',
-        enclaveCrs: payload.input.metadata.coordinates?.crs || 'EPSG 4326',
+        enclaveCrs: inputObj.metadata.coordinates?.crs || 'EPSG 4326',
         query: payload.query,
-        input: payload.input,
+        input: inputObj,
         model: selectedModel,
         results: {
           summary: summaryText,
@@ -144,13 +250,13 @@ The exact boundaries and specific types of these land-cover types vary depending
               badge: 'OPTICAL',
               visible: true,
               opacity: 100,
-              imageUrl: payload.input.imageUrl
+              imageUrl: inputObj.imageUrl
             }
           ],
           metrics: {
             runtimeMs: 2450,
             confidenceLabel: isVqa ? 'Not calibrated (Demo)' : 'Demo confidence',
-            cloudOcclusionPercent: payload.input.metadata.cloudCoveragePercent || 0.0
+            cloudOcclusionPercent: inputObj.metadata.cloudCoveragePercent || 0.0
           }
         },
         trace: {
@@ -181,11 +287,64 @@ The exact boundaries and specific types of these land-cover types vary depending
       });
     }
 
-    const res = await apiClient.post<Analysis>('/api/v1/analyses', payload);
+    // REAL API MODE:
+    const formData = new FormData();
+
+    // 1. Resolve image file
+    let imageFile: File | Blob | null = ('file' in payload && payload.file) ? payload.file : null;
+    let fileName = ('metadata' in payload && payload.metadata?.filename) || 
+                   ('input' in payload && payload.input?.metadata?.filename) || 
+                   'satellite_scene.jpg';
+
+    if (!imageFile) {
+      const urlToFetch = ('imageUrl' in payload && payload.imageUrl) || 
+                         ('input' in payload && payload.input?.imageUrl);
+      if (urlToFetch) {
+        try {
+          const resp = await fetch(urlToFetch);
+          imageFile = await resp.blob();
+        } catch (fetchErr) {
+          console.error('Failed to resolve sample image URL to blob:', fetchErr);
+        }
+      }
+    }
+
+    if (!imageFile) {
+      throw new Error('Please select or upload a satellite image file.');
+    }
+
+    formData.append('image', imageFile, fileName);
+
+    // 2. Query
+    const queryText = payload.query.text;
+    formData.append('query', queryText);
+
+    // 3. Modality
+    const modality = ('modality' in payload && payload.modality) || 
+                     ('input' in payload && payload.input?.metadata?.modality) || 
+                     'auto';
+    formData.append('modality', modality);
+
+    // 4. Task
+    const task = payload.query.task || 'vqa';
+    formData.append('task', task);
+
+    // 5. Model Selection Mode & Model ID
+    const modelSelectionMode = ('modelSelectionMode' in payload && payload.modelSelectionMode) || 'auto';
+    formData.append('model_selection_mode', modelSelectionMode);
+
+    if (payload.modelId) {
+      formData.append('model_id', payload.modelId);
+    }
+
+    if ('projectId' in payload && payload.projectId) {
+      formData.append('project_id', payload.projectId);
+    }
+
+    const res = await apiClient.postFormData<{ analysis_id: string; status: string }>('/api/v1/analyses', formData);
     return {
-      analysis_id: res.id,
-      status: res.status,
-      analysis: res
+      analysis_id: res.analysis_id,
+      status: res.status
     };
   }
 

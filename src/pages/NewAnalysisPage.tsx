@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Upload, 
@@ -10,9 +10,10 @@ import {
   AlertCircle,
   X
 } from 'lucide-react';
-import type { Modality, TaskType, ImageryMetadata } from '../types';
+import type { Modality, TaskType, ImageryMetadata, ModelInfo } from '../types';
 import { MOCK_MODELS } from '../mocks/modelMocks';
 import { analysisService } from '../services/analysisService';
+import { modelService } from '../services/modelService';
 
 export const NewAnalysisPage: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export const NewAnalysisPage: React.FC = () => {
 
   // Form State
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('/samples/guinea-bissau-sample.jpg');
   const [metadata, setMetadata] = useState<ImageryMetadata>({
     filename: 'Earth_from_Space_Guinea-Bissau.jpg',
@@ -46,9 +48,30 @@ export const NewAnalysisPage: React.FC = () => {
   );
   const [taskType, setTaskType] = useState<TaskType>('vqa');
   const [modelMode, setModelMode] = useState<'auto' | 'manual'>('auto');
+  const [models, setModels] = useState<ModelInfo[]>(MOCK_MODELS);
   const [selectedModelId, setSelectedModelId] = useState<string>(MOCK_MODELS[0].id);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Load available models from registry / backend
+  useEffect(() => {
+    let isMounted = true;
+    modelService.getModels()
+      .then((data) => {
+        if (isMounted && data && data.length > 0) {
+          setModels(data);
+          if (!data.some((m) => m.id === selectedModelId)) {
+            setSelectedModelId(data[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not retrieve live models, using default registry:', err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Suggested Technical Queries
   const sampleQueries = [
@@ -62,6 +85,7 @@ export const NewAnalysisPage: React.FC = () => {
   // Handle Drag & Drop and File Selection
   const handleFileProcess = (file: File) => {
     setErrorMessage(null);
+    setSelectedFile(file);
     const validFormats = ['image/png', 'image/jpeg', 'image/jpg', 'image/tiff'];
     const isTiff = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
 
@@ -117,6 +141,7 @@ export const NewAnalysisPage: React.FC = () => {
 
   const handleSelectSample = (type: 'guinea-bissau' | 'port') => {
     setErrorMessage(null);
+    setSelectedFile(null);
     if (type === 'guinea-bissau') {
       setImagePreview('/samples/guinea-bissau-sample.jpg');
       setMetadata({
@@ -183,7 +208,14 @@ export const NewAnalysisPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const resolvedModality = modality === 'auto' ? 'optical' : modality;
+      const targetModelId = modelMode === 'manual' ? selectedModelId : (models[0]?.id || MOCK_MODELS[0].id);
+
       const res = await analysisService.createAnalysis({
+        file: selectedFile,
+        imageUrl: imagePreview,
+        modality: resolvedModality,
+        modelSelectionMode: modelMode,
+        modelId: targetModelId,
         input: {
           imageUrl: imagePreview,
           metadata: {
@@ -195,7 +227,10 @@ export const NewAnalysisPage: React.FC = () => {
           text: queryText.trim(),
           task: taskType
         },
-        modelId: modelMode === 'manual' ? selectedModelId : MOCK_MODELS[0].id
+        metadata: {
+          ...metadata,
+          modality: resolvedModality
+        }
       });
 
       // Navigate to analysis workspace for live processing progression
@@ -512,7 +547,7 @@ export const NewAnalysisPage: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {MOCK_MODELS.map((m) => (
+                {models.map((m) => (
                   <div
                     key={m.id}
                     onClick={() => setSelectedModelId(m.id)}

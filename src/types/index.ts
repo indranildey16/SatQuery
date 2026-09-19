@@ -134,6 +134,20 @@ export interface Analysis {
   updatedAt: string;
 }
 
+export interface CreateAnalysisPayload {
+  file?: File | Blob | null;
+  imageUrl?: string;
+  query: {
+    text: string;
+    task: TaskType;
+  };
+  modality?: Modality;
+  modelSelectionMode?: 'auto' | 'manual';
+  modelId?: string;
+  projectId?: string;
+  metadata?: Partial<ImageryMetadata>;
+}
+
 export interface Project {
   id: string;
   name: string;

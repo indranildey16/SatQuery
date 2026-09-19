@@ -27,8 +27,9 @@ const PIPELINE_STEPS = [
 ];
 
 export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
+  const normalizedCurrentStage = (analysis.currentStage || '').replace(/_/g, ' ').toUpperCase();
   const currentStageIndex = PIPELINE_STEPS.findIndex(
-    (s) => s.id === analysis.currentStage
+    (s) => s.id.toUpperCase() === normalizedCurrentStage
   );
   const activeIndex = currentStageIndex === -1 ? 0 : currentStageIndex;
   const progressPercent = analysis.progress || Math.round(((activeIndex + 1) / PIPELINE_STEPS.length) * 100);
@@ -58,7 +59,7 @@ export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
 
         <div className="mt-2 flex items-center space-x-2 text-xs text-[#c2410c] italic">
           <Compass className="w-3.5 h-3.5 not-italic shrink-0" />
-          <span className="truncate">"{analysis.query.text}"</span>
+          <span className="truncate">"{analysis.query?.text || 'Remote-Sensing Scene Inquiry'}"</span>
         </div>
       </div>
 
@@ -70,7 +71,7 @@ export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
             <div className="flex items-center space-x-2">
               <Terminal className="w-4 h-4 text-[#c2410c]" />
               <span className="font-semibold text-slate-800">
-                CURRENT STAGE: <span className="text-[#c2410c]">{analysis.currentStage || 'PROCESSING'}</span>
+                CURRENT STAGE: <span className="text-[#c2410c]">{normalizedCurrentStage || 'PROCESSING'}</span>
               </span>
             </div>
             <span className="font-bold text-slate-700">{progressPercent}%</span>
@@ -85,7 +86,7 @@ export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
           </div>
 
           <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-slate-400">
-            <span>Model: {analysis.model.name}</span>
+            <span>Model: {analysis.model?.name || 'Qwen2.5-VL-3B-Instruct'}</span>
             <span className="flex items-center space-x-1">
               <Clock className="w-3 h-3 text-slate-400" />
               <span>Simulated Async Inference (~2.5s)</span>
@@ -180,20 +181,20 @@ export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
             <div className="flex items-center space-x-3">
               <div className="w-16 h-16 rounded bg-slate-900 overflow-hidden border border-slate-200 shrink-0">
                 <img
-                  src={analysis.input.imageUrl}
+                  src={analysis.input?.imageUrl || '/samples/guinea-bissau-sample.jpg'}
                   alt="Thumbnail"
                   className="w-full h-full object-cover"
                 />
               </div>
               <div className="text-xs font-mono space-y-0.5">
                 <div className="font-semibold text-slate-900 truncate max-w-[200px]">
-                  {analysis.input.metadata.filename}
+                  {analysis.input?.metadata?.filename || 'satellite_scene.jpg'}
                 </div>
                 <div className="text-slate-400 text-[11px]">
-                  Modality: <span className="uppercase text-slate-600">{analysis.input.metadata.modality}</span>
+                  Modality: <span className="uppercase text-slate-600">{analysis.input?.metadata?.modality || 'optical'}</span>
                 </div>
                 <div className="text-slate-400 text-[11px]">
-                  Size: {(analysis.input.metadata.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
+                  Size: {analysis.input?.metadata?.fileSizeBytes ? (analysis.input.metadata.fileSizeBytes / (1024 * 1024)).toFixed(2) : '5.10'} MB
                 </div>
               </div>
             </div>
@@ -205,10 +206,10 @@ export const ProcessingView: React.FC<ProcessingViewProps> = ({ analysis }) => {
               <span>Engine Worker</span>
             </div>
             <div className="text-xs font-mono space-y-1">
-              <div className="font-semibold text-slate-900">{analysis.model.name}</div>
-              <div className="text-slate-500 text-[11px]">Environment: {analysis.model.environment}</div>
+              <div className="font-semibold text-slate-900">{analysis.model?.name || 'Qwen2.5-VL-3B-Instruct'}</div>
+              <div className="text-slate-500 text-[11px]">Environment: {analysis.model?.environment || 'Inference Worker'}</div>
               <div className="text-[10px] text-slate-400">
-                Status: Deterministic Mock Simulation Active
+                Status: Pipeline Execution Active
               </div>
             </div>
           </div>

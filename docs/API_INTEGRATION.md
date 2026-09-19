@@ -323,3 +323,34 @@ curl -X POST http://localhost:8000/api/v1/analyses \
 ```bash
 curl http://localhost:8000/api/v1/analyses/ANL-2024-XXXX
 ```
+
+---
+
+## 6. Frontend Integration & Dual-Mode Configuration (Stage 4)
+
+SatQuery AI's React frontend connects seamlessly to the FastAPI backend while retaining a full mock fallback mode.
+
+### Environment Configuration (`.env`)
+
+```bash
+# Connect to live FastAPI backend (default for Stage 4)
+VITE_API_BASE_URL=http://localhost:8000
+VITE_USE_MOCK_API=false
+
+# Or switch to standalone frontend mock mode
+# VITE_USE_MOCK_API=true
+```
+
+### Dual-Mode Architecture
+
+1. **Live Backend Mode (`VITE_USE_MOCK_API=false`)**:
+   - `analysisService.createAnalysis`: Constructs `multipart/form-data` with direct image file (or fetched sample blob) and submits to `POST /api/v1/analyses`.
+   - `useAnalysisPolling`: Polls `GET /api/v1/analyses/{id}` at 750ms intervals.
+   - `ProcessingView`: Shows live 8-stage execution trace as FastAPI advances through stages.
+   - `AnalysisResultPage`: Displays completed result, verbatim model answer, structured findings, and trace telemetry.
+   - `HistoryPage`: Displays persistent analysis registry directly from `GET /api/v1/analyses`.
+
+2. **Standalone Mock Mode (`VITE_USE_MOCK_API=true`)**:
+   - All operations are handled in-memory and persisted to browser `localStorage`.
+   - Toggleable at runtime via the `API MOCK` switch in the application topbar.
+   - Preserves offline development capability without requiring the Python backend.
